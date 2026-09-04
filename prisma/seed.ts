@@ -1,4 +1,5 @@
 import { PrismaClient, UserRole, PhysicalRoomStatus, TableStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -66,7 +67,10 @@ async function main() {
     });
   }
 
-  // Initial Admin User
+  // Initial Admin User (Explicitly flagged development credential)
+  const devPassword = process.env.SEED_ADMIN_PASSWORD || 'password123';
+  const hashedAdminPassword = await bcrypt.hash(devPassword, 10);
+
   await prisma.user.upsert({
     where: { email: 'admin@royalreserve.com' },
     update: {},
@@ -75,6 +79,7 @@ async function main() {
       name: 'Executive General Manager',
       role: UserRole.SUPER_ADMIN,
       roleEntityId: roleMap['SUPER_ADMIN'],
+      passwordHash: hashedAdminPassword,
       isActive: true,
     },
   });
