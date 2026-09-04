@@ -42,7 +42,22 @@
 
 ## 3. Centralized RBAC & Server Action Enforcement
 
-### 3.1 Granular Permission Verification
+### 3.1 Approved 9-Role Model
+The system enforces strictly the 9 business roles:
+1. `SUPER_ADMIN`: Unrestricted administrative and system governance authority across all domains.
+2. `ADMIN`: Full operational authority across bookings, front desk, restaurant, inventory, procurement, and reports (excluding user & role management).
+3. `RECEPTIONIST`: Front desk operations, reservations, check-in, check-out, room status updates, guest profile management, and folio billing/settlement.
+4. `RESTAURANT_MANAGER`: Restaurant floor management, table allocations, order handling, bill settlements, KDS viewing, and operational reports.
+5. `RESTAURANT_BILLER`: Order entry, table bill generation, and point-of-sale receipt settlement.
+6. `KITCHEN_STAFF`: Kitchen Display System (KDS) order viewing and KOT status updates (`PREPARING`, `READY`).
+7. `STORE_MANAGER`: Inventory management, stock issues, stock adjustments, stock transfers, physical counts, and Goods Receipt Notes (GRN).
+8. `PURCHASE_MANAGER`: Procurement lifecycle, purchase requests, purchase orders, purchase bill processing, vendor management, and operational procurement reports.
+9. `CONTENT_MANAGER`: Website content, promotional banners, packages, and room type public catalog presentation.
+
+> [!IMPORTANT]
+> Deprecated/unofficial roles (`FRONT_DESK`, `RESTAURANT_CASHIER`, `INVENTORY_MANAGER`, `HOUSEKEEPING`, `MAINTENANCE`) are strictly prohibited as user roles. Physical room maintenance is tracked via `PhysicalRoomStatus.MAINTENANCE`, not a user role.
+
+### 3.2 Granular Permission Verification
 * All sensitive Server Actions must invoke `requirePermission(permission)`:
   ```typescript
   import { requirePermission } from '@/lib/auth/auth';
@@ -54,12 +69,28 @@
   ```
 * Middleware acts only as an edge router guard (`/admin/*`), redirecting unauthenticated traffic to `/admin/login`. **Middleware is never the authoritative authorization layer.**
 
-### 3.2 Super Administrator Protection Invariant
-* At least one active `SUPER_ADMIN` must remain in the system at all times.
-* The helper `assertSuperAdminInvariant(userId, newRole, newActiveStatus)` ensures that operations attempting to deactivate, delete, or downgrade the sole remaining Super Administrator fail with a `BUSINESS_RULE_VIOLATION`.
+### 3.3 Super Administrator Protection Invariant & Concurrency
+* **Invariant:** At least one active `SUPER_ADMIN` must remain in the system at all times.
+* **Transactional Guarantee:** The helper `assertSuperAdminInvariant(targetUserId, newRole, newActiveStatus, db)` accepts an optional Prisma client or transaction client (`db: Prisma.TransactionClient | PrismaClient`). To prevent race conditions under concurrent administrative requests, callers must execute this check inside an interactive transaction (e.g. `prisma.$transaction(async (tx) => { ... })`) with serializable isolation or row-level locking.
+* Operations attempting to deactivate, delete, or downgrade the sole remaining Super Administrator fail with `BUSINESS_RULE_VIOLATION: Cannot deactivate, downgrade, or remove the last active Super Administrator.`.
 
 ---
 
-## 4. Security Audit Logging
+## 4. Session Invalidation & Lifecycle Triggers
+
+### 4.1 Session Versioning (`sessionVersion`)
+Every staff user record maintains an integer `sessionVersion` column in PostgreSQL:
+* **Token Issuance:** The issued JWT contains `sessionVersion`.
+* **Token Verification:** Every request verified by `getCurrentUser()` reads the live user from PostgreSQL and strictly verifies `user.sessionVersion === session.sessionVersion`.
+* **Invalidation Triggers:**
+  1. Password reset or change
+  2. Role change or privilege downgrade
+  3. Account deactivation (`isActive` set to `false`)
+  4. Manual "Revoke All Sessions" / security reset
+* Incrementing `sessionVersion` immediately invalidates all active sessions across all devices without needing a stateful token blacklist.
+
+---
+
+## 5. Security Audit Logging
 * Events logged to `AuditLog`: `LOGIN_SUCCESS`, `LOGIN_FAILURE`, `LOGIN_RATE_LIMITED`, `LOGIN_SYSTEM_ERROR`, and `LOGOUT`.
 * Automatic redaction of sensitive parameters (`password`, `passwordHash`, `token`, `secret`, `authSecret`) in [src/lib/auth/audit.ts](file:///d:/xampp/htdocs/Projects--git/resort/src/lib/auth/audit.ts).

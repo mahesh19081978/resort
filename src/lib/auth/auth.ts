@@ -105,20 +105,36 @@ export async function requirePermission(permission: Permission): Promise<Authent
   return user;
 }
 
+import type { Prisma } from '@prisma/client';
+
 /**
- * Enforces the Super Administrator invariant transactionally.
  * Ensures at least one active SUPER_ADMIN account remains in the system.
+ *
+ * Concurrency & Transaction Guarantee:
+ * To eliminate race conditions where concurrent downgrade/deactivation operations could leave zero
+ * active Super Admins, this check should be executed within an interactive transaction
+ * (e.g. `prisma.$transaction(async (tx) => { ... })`) with appropriate database locking or serializable isolation.
+ *
+ * @param targetUserId - The ID of the user being modified or deleted.
+ * @param newRole - The proposed new role (if role is changing).
+ * @param newActiveStatus - The proposed new active status (if status is changing).
+ * @param db - Prisma client or transaction client (`Prisma.TransactionClient | typeof prisma`). Defaults to global prisma.
  */
-export async function assertSuperAdminInvariant(targetUserId: string, newRole?: UserRole, newActiveStatus?: boolean): Promise<void> {
+export async function assertSuperAdminInvariant(
+  targetUserId: string,
+  newRole?: UserRole,
+  newActiveStatus?: boolean,
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
   // If target user is being deactivated or downgraded from SUPER_ADMIN:
   if (newActiveStatus === false || (newRole && newRole !== 'SUPER_ADMIN')) {
-    const targetUser = await prisma.user.findUnique({
+    const targetUser = await db.user.findUnique({
       where: { id: targetUserId },
       select: { role: true, isActive: true },
     });
 
     if (targetUser && targetUser.role === 'SUPER_ADMIN' && targetUser.isActive) {
-      const activeSuperAdminsCount = await prisma.user.count({
+      const activeSuperAdminsCount = await db.user.count({
         where: {
           role: 'SUPER_ADMIN',
           isActive: true,
