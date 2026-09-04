@@ -1,6 +1,11 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '25mb',
+    },
+  },
   reactStrictMode: true,
   poweredByHeader: false,
   headers: async () => {

@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 import { IdDocumentType, PaymentMethod } from '@prisma/client';
 
 export const checkInSchema = z.object({
@@ -14,6 +14,9 @@ export const checkInSchema = z.object({
   documentMimeType: z.string().trim().max(100).optional(),
   documentFileSize: z.coerce.number().int().positive().max(15 * 1024 * 1024).optional(),
   photoStorageRef: z.string().trim().min(5, 'Valid photo storage reference is required').optional(),
+  advanceDepositAmount: z.coerce.number().min(0, 'Deposit amount cannot be negative').optional(),
+  advanceDepositMethod: z.nativeEnum(PaymentMethod).optional(),
+  advanceDepositReference: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
 

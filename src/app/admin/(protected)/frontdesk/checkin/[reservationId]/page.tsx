@@ -42,7 +42,7 @@ export default async function CheckInPage({ params }: CheckInPageProps) {
   const roomTypeId = reservedRoom?.roomTypeId;
 
   const eligibleRooms = roomTypeId
-    ? await getEligibleRoomsForCheckIn(undefined, roomTypeId, prisma)
+    ? await getEligibleRoomsForCheckIn(undefined, roomTypeId, reservation.id, prisma)
     : [];
 
   const serializedReservation = {

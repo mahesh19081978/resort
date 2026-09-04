@@ -247,7 +247,7 @@ async function runFrontDeskTestSuite() {
     assert.strictEqual(threw, true, 'Check-in on occupied room must throw');
   }
 
-  // 2.3 Check-In on DIRTY or MAINTENANCE room must be blocked
+    // 2.3 Check-In on DIRTY or MAINTENANCE room must be blocked
   {
     for (const badStatus of [PhysicalRoomStatus.DIRTY, PhysicalRoomStatus.CLEANING, PhysicalRoomStatus.MAINTENANCE, PhysicalRoomStatus.OUT_OF_ORDER]) {
       const mockBadRoom = {
@@ -279,6 +279,148 @@ async function runFrontDeskTestSuite() {
       }
       assert.strictEqual(threw, true);
     }
+  }
+
+  // 2.4 Scenario B Check-In: Room is RESERVED for THIS reservation -> SUCCEEDS
+  {
+    const mockReservedRoom = {
+      ...mockRoomAvailable,
+      status: PhysicalRoomStatus.RESERVED,
+      notes: `Pre-reserved for reservation ${mockReservation.id}`,
+    };
+
+    let updatedToOccupied = false;
+    const mockTx: any = {
+      reservation: { findUnique: async () => mockReservation, update: async () => mockReservation },
+      room: {
+        findUnique: async () => mockReservedRoom,
+        update: async (args: any) => {
+          if (args.data.status === PhysicalRoomStatus.OCCUPIED) updatedToOccupied = true;
+          return { ...mockReservedRoom, status: args.data.status };
+        },
+      },
+      stay: {
+        findMany: async () => [],
+        create: async (args: any) => ({ id: 'stay-res-b', ...args.data }),
+      },
+      roomAssignment: {
+        findFirst: async () => null,
+        create: async (args: any) => args.data,
+      },
+      stayGuest: { create: async (args: any) => args.data },
+      folio: { create: async (args: any) => ({ id: 'folio-res-b', ...args.data }) },
+      folioItem: { create: async (args: any) => args.data },
+      guestDocument: { create: async (args: any) => args.data },
+      guestPhoto: { create: async () => ({}) },
+      auditLog: { create: async () => ({}) },
+    };
+
+    const res = await executeCheckIn(
+      {
+        reservationId: mockReservation.id,
+        roomId: mockReservedRoom.id,
+        expectedCheckOut: new Date(Date.now() + 86400000).toISOString(),
+        idDocumentType: IdDocumentType.PASSPORT,
+        idDocumentNumber: 'P12345678',
+      },
+      mockActor,
+      mockTx
+    );
+
+    assert.strictEqual(res.roomNumber, mockReservedRoom.roomNumber);
+    assert.strictEqual(updatedToOccupied, true, 'RESERVED room for this reservation must transition to OCCUPIED');
+  }
+
+  // 2.5 Scenario B Rejection: Room is RESERVED for ANOTHER reservation -> MUST THROW
+  {
+    const mockReservedForOtherRoom = {
+      ...mockRoomAvailable,
+      status: PhysicalRoomStatus.RESERVED,
+      notes: 'Pre-reserved for reservation cjy9999999999999999999999',
+    };
+
+    const mockTx: any = {
+      reservation: { findUnique: async () => mockReservation },
+      room: { findUnique: async () => mockReservedForOtherRoom },
+      stay: { findMany: async () => [] },
+      roomAssignment: { findFirst: async () => null },
+    };
+
+    let threw = false;
+    try {
+      await executeCheckIn(
+        {
+          reservationId: mockReservation.id,
+          roomId: mockReservedForOtherRoom.id,
+          expectedCheckOut: new Date(Date.now() + 86400000).toISOString(),
+          idDocumentType: IdDocumentType.PASSPORT,
+          idDocumentNumber: 'P12345678',
+        },
+        mockActor,
+        mockTx
+      );
+    } catch (err: any) {
+      threw = true;
+      assert.match(err.message, /ROOM_RESERVED_FOR_OTHER/, 'Must reject room reserved for another reservation');
+    }
+    assert.strictEqual(threw, true, 'Check-in on room reserved for another reservation must fail');
+  }
+
+  // 2.6 Check-In with Advance Deposit Collection
+  {
+    let advancePaymentCreated = false;
+    let reservationAdvanceUpdated = false;
+
+    const mockTx: any = {
+      reservation: {
+        findUnique: async () => ({ ...mockReservation, advancePaidAmount: new Prisma.Decimal(0) }),
+        update: async (args: any) => {
+          if (args.data.advancePaidAmount) reservationAdvanceUpdated = true;
+          return mockReservation;
+        },
+      },
+      room: {
+        findUnique: async () => mockRoomAvailable,
+        update: async () => mockRoomAvailable,
+      },
+      stay: {
+        findMany: async () => [],
+        create: async (args: any) => ({ id: 'stay-deposit', ...args.data }),
+      },
+      stayGuest: { create: async (args: any) => args.data },
+      roomAssignment: { create: async (args: any) => args.data },
+      folio: { create: async (args: any) => ({ id: 'folio-deposit', ...args.data }) },
+      folioItem: { create: async (args: any) => args.data },
+      guestDocument: { create: async (args: any) => args.data },
+      guestPhoto: { create: async () => ({}) },
+      payment: {
+        create: async (args: any) => {
+          advancePaymentCreated = true;
+          assert.strictEqual(args.data.context, PaymentContext.RESERVATION_ADVANCE);
+          assert.strictEqual(args.data.amount.equals(2000), true);
+          return args.data;
+        },
+      },
+      auditLog: { create: async () => ({}) },
+    };
+
+    await executeCheckIn(
+      {
+        reservationId: mockReservation.id,
+        roomId: mockRoomAvailable.id,
+        expectedCheckOut: new Date(Date.now() + 86400000).toISOString(),
+        idDocumentType: IdDocumentType.PASSPORT,
+        idDocumentNumber: 'P12345678',
+        advanceDepositAmount: 2000,
+        advanceDepositMethod: 'UPI',
+        advanceDepositReference: 'UPI-REF-9988',
+      },
+      mockActor,
+      mockTx
+    );
+
+    assert.strictEqual(advancePaymentCreated, true, 'Advance deposit Payment record must be created');
+    assert.strictEqual(reservationAdvanceUpdated, true, 'Reservation advancePaidAmount must be updated');
   }
 
   // ----------------------------------------------------

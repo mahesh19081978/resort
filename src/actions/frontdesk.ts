@@ -33,7 +33,7 @@ export async function getEligibleRoomsAction(
 ): Promise<ActionResponse> {
   try {
     await requirePermission('checkin:perform');
-    const rooms = await getEligibleRoomsForCheckIn(propertyId, roomTypeId, prisma);
+    const rooms = await getEligibleRoomsForCheckIn(propertyId, roomTypeId, undefined, prisma);
     return { success: true, data: rooms };
   } catch (error) {
     return {
@@ -66,6 +66,11 @@ export async function checkInAction(
       documentFileSize: formData.get('documentFileSize') ? Number(formData.get('documentFileSize')) : undefined,
       photoStorageRef: formData.get('photoStorageRef')?.toString() || undefined,
       notes: formData.get('notes')?.toString() || undefined,
+      advanceDepositAmount: formData.get('advanceDepositAmount')
+        ? Number(formData.get('advanceDepositAmount'))
+        : undefined,
+      advanceDepositMethod: formData.get('advanceDepositMethod')?.toString() || undefined,
+      advanceDepositReference: formData.get('advanceDepositReference')?.toString() || undefined,
     };
 
     const parsed = checkInSchema.safeParse(raw);

@@ -36,6 +36,7 @@ export interface EligibleRoomResult {
 export async function getEligibleRoomsForCheckIn(
   propertyId: string | undefined | null,
   roomTypeId: string,
+  reservationId?: string,
   db: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<EligibleRoomResult[]> {
   const rooms = await db.room.findMany({
@@ -53,6 +54,18 @@ export async function getEligibleRoomsForCheckIn(
       },
     },
     include: {
+      assignments: {
+        where: {
+          stay: {
+            reservationId: reservationId || 'non-existent',
+          },
+        },
+        select: {
+          id: true,
+          stayId: true,
+          status: true,
+        },
+      },
       floor: {
         include: {
           building: {
@@ -67,5 +80,18 @@ export async function getEligibleRoomsForCheckIn(
     orderBy: [{ floor: { floorNumber: 'asc' } }, { roomNumber: 'asc' }],
   });
 
-  return rooms as unknown as EligibleRoomResult[];
+  // Filter out any RESERVED room that doesn't have an association to this reservation
+  const filtered = rooms.filter((r: any) => {
+    if (r.status === PhysicalRoomStatus.AVAILABLE) {
+      return true;
+    }
+    if (r.status === PhysicalRoomStatus.RESERVED) {
+      // Must have an assignment or reservation linkage for this specific reservationId
+      if (!reservationId) return false;
+      return Array.isArray(r.assignments) && r.assignments.length > 0;
+    }
+    return false;
+  });
+
+  return filtered as unknown as EligibleRoomResult[];
 }

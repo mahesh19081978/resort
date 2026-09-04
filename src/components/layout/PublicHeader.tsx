@@ -7,10 +7,10 @@ export function PublicHeader() {
       <div className="container mx-auto flex h-20 items-center justify-between px-6">
         <Link href="/" className="flex items-center gap-2">
           <span className="font-serif text-2xl font-bold tracking-wider text-resort-forest">
-            THE ROYAL RESERVE
+            INFINITY RESORT
           </span>
           <span className="rounded bg-resort-gold/20 px-2 py-0.5 text-xs font-semibold text-resort-darkwood">
-            RESORT & SPA
+            RESORT & RESTAURANT
           </span>
         </Link>
 

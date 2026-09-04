@@ -15,6 +15,9 @@ export interface ExecuteCheckInParams {
   documentFileSize?: number;
   photoStorageRef?: string;
   notes?: string;
+  advanceDepositAmount?: number;
+  advanceDepositMethod?: string;
+  advanceDepositReference?: string;
 }
 
 export interface CheckInResult {
@@ -74,6 +77,9 @@ export async function executeCheckIn(
       include: {
         assignments: {
           where: { status: RoomAssignmentStatus.ACTIVE },
+          include: {
+            stay: true,
+          },
         },
       },
     });
@@ -107,6 +113,34 @@ export async function executeCheckIn(
       throw new Error(
         'ROOM_ALREADY_OCCUPIED: Room [' + room.roomNumber + '] is already occupied or has an active stay assignment.'
       );
+    }
+
+    // Scenario B: Physical room has RESERVED status
+    // A RESERVED room must NOT be selectable merely because it is RESERVED.
+    // It is ONLY valid if preassigned/reserved for this reservation.
+    if (room.status === PhysicalRoomStatus.RESERVED) {
+      // Check if room is linked to this reservation via previous assignment or notes
+      const reservationStays = await tx.stay.findMany({
+        where: { reservationId: reservation.id },
+        select: { id: true },
+      });
+      const reservationStayIds = reservationStays.map((s) => s.id);
+
+      const isAssignedToThisRes = await tx.roomAssignment.findFirst({
+        where: {
+          roomId: room.id,
+          stayId: { in: reservationStayIds },
+        },
+      });
+
+      // If no assignment link found, check if notes or reference explicitly reserves it for this reservation
+      const belongsToThisReservation = !!isAssignedToThisRes || (room.notes && room.notes.includes(reservation.id));
+
+      if (!belongsToThisReservation) {
+        throw new Error(
+          'ROOM_RESERVED_FOR_OTHER: Room [' + room.roomNumber + '] is reserved for another guest or reservation and cannot be checked in.'
+        );
+      }
     }
 
     if (params.idDocumentNumber) {
@@ -186,6 +220,34 @@ export async function executeCheckIn(
       await tx.reservation.update({
         where: { id: reservation.id },
         data: { status: 'CONFIRMED' },
+      });
+    }
+
+    // Handle Advance Deposit Collection during check-in if provided
+    if (params.advanceDepositAmount && params.advanceDepositAmount > 0) {
+      const depositAmount = new Prisma.Decimal(params.advanceDepositAmount.toFixed(2));
+      const payRandSuffix = Math.floor(1000 + Math.random() * 9000);
+      const paymentNumber = 'PAY-' + dateStr + '-' + payRandSuffix;
+      const method = (params.advanceDepositMethod as any) || 'CASH';
+
+      await tx.payment.create({
+        data: {
+          paymentNumber,
+          context: 'RESERVATION_ADVANCE',
+          amount: depositAmount,
+          currency: 'INR',
+          method,
+          status: 'SUCCESS',
+          transactionReference: params.advanceDepositReference || null,
+          reservationId: reservation.id,
+        },
+      });
+
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          advancePaidAmount: reservation.advancePaidAmount.plus(depositAmount),
+        },
       });
     }
 

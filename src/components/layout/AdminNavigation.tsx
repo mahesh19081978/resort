@@ -47,7 +47,7 @@ export function AdminSidebar() {
     <aside className="w-64 border-r border-resort-sand/80 bg-white flex flex-col shrink-0 min-h-screen">
       <div className="h-16 border-b border-resort-sand/80 flex items-center px-6">
         <Link href="/admin/dashboard" className="flex items-center gap-2">
-          <span className="font-serif font-bold text-lg text-resort-forest">THE ROYAL RESERVE</span>
+          <span className="font-serif font-bold text-lg text-resort-forest">INFINITY RESORT</span>
           <span className="rounded bg-resort-forest text-resort-ivory text-[10px] font-bold px-1.5 py-0.5">
             PMS
           </span>
