@@ -337,10 +337,9 @@ async function main() {
   }
 
   const catKebabs = await prisma.menuCategory.upsert({
-    where: { id: 'cat_kebabs_id' },
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Clay Oven & Tandoor Kebabs' } },
     update: {},
     create: {
-      id: 'cat_kebabs_id',
       restaurantId: restaurant.id,
       name: 'Clay Oven & Tandoor Kebabs',
       displayOrder: 1,
@@ -348,10 +347,9 @@ async function main() {
   });
 
   const catMains = await prisma.menuCategory.upsert({
-    where: { id: 'cat_mains_id' },
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Regional Curries & Biryani' } },
     update: {},
     create: {
-      id: 'cat_mains_id',
       restaurantId: restaurant.id,
       name: 'Regional Curries & Biryani',
       displayOrder: 2,
@@ -359,10 +357,9 @@ async function main() {
   });
 
   const catBeverages = await prisma.menuCategory.upsert({
-    where: { id: 'cat_beverages_id' },
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Cold Pressed Juices & Brews' } },
     update: {},
     create: {
-      id: 'cat_beverages_id',
       restaurantId: restaurant.id,
       name: 'Cold Pressed Juices & Brews',
       displayOrder: 3,

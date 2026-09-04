@@ -496,10 +496,11 @@ model RatePlan {
   name        String
   code        String     @unique
   description String?
-  isActive    Boolean    @default(true)
+  isActive    Boolean           @default(true)
   roomRates   RoomRate[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  reservationRooms ReservationRoom[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 }
 
 model RoomRate {
@@ -517,7 +518,8 @@ model RoomRate {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  @@unique([roomTypeId, ratePlanId])
+  @@index([roomTypeId, ratePlanId])
+  @@index([startDate, endDate])
 }
 // ==========================================
 // 5. GUESTS & SENSITIVE VERIFICATION
@@ -630,18 +632,23 @@ model Reservation {
 }
 
 model ReservationRoom {
-  id            String      @id @default(cuid())
-  reservationId String
-  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  roomTypeId    String
-  roomType      RoomType    @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
-  roomsCount    Int         @default(1)
-  ratePerNight  Decimal     @db.Decimal(12, 2)
-  totalNights   Int
-  lineTotal     Decimal     @db.Decimal(12, 2)
+  id             String      @id @default(cuid())
+  reservationId  String
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  roomTypeId     String
+  roomType       RoomType    @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  ratePlanId     String?
+  ratePlan       RatePlan?   @relation(fields: [ratePlanId], references: [id], onDelete: SetNull)
+  roomsCount     Int         @default(1)
+  ratePerNight   Decimal     @db.Decimal(12, 2)
+  totalNights    Int
+  discountAmount Decimal     @default(0.00) @db.Decimal(12, 2)
+  taxAmount      Decimal     @default(0.00) @db.Decimal(12, 2)
+  lineTotal      Decimal     @db.Decimal(12, 2)
 
   @@index([reservationId])
   @@index([roomTypeId])
+  @@index([ratePlanId])
 }
 
 model ReservationGuest {
@@ -898,6 +905,7 @@ model MenuCategory {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
+  @@unique([restaurantId, name])
   @@index([restaurantId])
 }
 
