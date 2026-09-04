@@ -55,35 +55,58 @@ export async function updatePropertyAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const existing = await prisma.property.findUnique({
-      where: { id: parsed.data.propertyId },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.property.findUnique({
+        where: { id: parsed.data.propertyId },
+      });
 
-    if (!existing) {
-      return { success: false, error: 'Property not found.' };
-    }
+      if (!existing) {
+        throw new Error('Property not found.');
+      }
 
-    const updated = await prisma.property.update({
-      where: { id: parsed.data.propertyId },
-      data: {
-        name: parsed.data.name,
-        address: parsed.data.address,
-        city: parsed.data.city,
-        state: parsed.data.state,
-        postalCode: parsed.data.postalCode,
-        country: parsed.data.country,
-        contactPhone: parsed.data.contactPhone,
-        contactEmail: parsed.data.contactEmail,
-      },
-    });
+      const prop = await tx.property.update({
+        where: { id: parsed.data.propertyId },
+        data: {
+          name: parsed.data.name,
+          address: parsed.data.address,
+          city: parsed.data.city,
+          state: parsed.data.state,
+          postalCode: parsed.data.postalCode,
+          country: parsed.data.country,
+          contactPhone: parsed.data.contactPhone,
+          contactEmail: parsed.data.contactEmail,
+        },
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'PROPERTY_UPDATE',
-      entity: 'Property',
-      entityId: updated.id,
-      oldValues: { name: existing.name, phone: existing.contactPhone, email: existing.contactEmail },
-      newValues: { name: updated.name, phone: updated.contactPhone, email: updated.contactEmail },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'PROPERTY_UPDATE',
+          entity: 'Property',
+          entityId: prop.id,
+          oldValues: {
+            name: existing.name,
+            address: existing.address,
+            city: existing.city,
+            state: existing.state,
+            postalCode: existing.postalCode,
+            contactPhone: existing.contactPhone,
+            contactEmail: existing.contactEmail,
+          },
+          newValues: {
+            name: prop.name,
+            address: prop.address,
+            city: prop.city,
+            state: prop.state,
+            postalCode: prop.postalCode,
+            contactPhone: prop.contactPhone,
+            contactEmail: prop.contactEmail,
+          },
+        },
+        tx
+      );
+
+      return prop;
     });
 
     revalidatePath('/admin/property');
@@ -111,41 +134,48 @@ export async function createBuildingAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    // Verify Property exists
-    const property = await prisma.property.findUnique({
-      where: { id: parsed.data.propertyId },
-    });
-    if (!property) {
-      return { success: false, error: 'Target property not found.' };
-    }
+    const building = await prisma.$transaction(async (tx) => {
+      // Verify Property exists
+      const property = await tx.property.findUnique({
+        where: { id: parsed.data.propertyId },
+      });
+      if (!property) {
+        throw new Error('Target property not found.');
+      }
 
-    // Check duplicate code within property
-    const existing = await prisma.building.findUnique({
-      where: {
-        propertyId_code: {
+      // Check duplicate code within property
+      const existing = await tx.building.findUnique({
+        where: {
+          propertyId_code: {
+            propertyId: parsed.data.propertyId,
+            code: parsed.data.code,
+          },
+        },
+      });
+      if (existing) {
+        throw new Error('A building with this code already exists in this property.');
+      }
+
+      const created = await tx.building.create({
+        data: {
           propertyId: parsed.data.propertyId,
+          name: parsed.data.name,
           code: parsed.data.code,
         },
-      },
-    });
-    if (existing) {
-      return { success: false, error: 'A building with this code already exists in this property.' };
-    }
+      });
 
-    const building = await prisma.building.create({
-      data: {
-        propertyId: parsed.data.propertyId,
-        name: parsed.data.name,
-        code: parsed.data.code,
-      },
-    });
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'BUILDING_CREATE',
+          entity: 'Building',
+          entityId: created.id,
+          newValues: { name: created.name, code: created.code, propertyId: created.propertyId },
+        },
+        tx
+      );
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'BUILDING_CREATE',
-      entity: 'Building',
-      entityId: building.id,
-      newValues: { name: building.name, code: building.code, propertyId: building.propertyId },
+      return created;
     });
 
     revalidatePath('/admin/property');
@@ -174,39 +204,46 @@ export async function createFloorAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const building = await prisma.building.findUnique({
-      where: { id: parsed.data.buildingId },
-    });
-    if (!building) {
-      return { success: false, error: 'Building not found.' };
-    }
+    const floor = await prisma.$transaction(async (tx) => {
+      const building = await tx.building.findUnique({
+        where: { id: parsed.data.buildingId },
+      });
+      if (!building) {
+        throw new Error('Building not found.');
+      }
 
-    const existing = await prisma.floor.findUnique({
-      where: {
-        buildingId_floorNumber: {
+      const existing = await tx.floor.findUnique({
+        where: {
+          buildingId_floorNumber: {
+            buildingId: parsed.data.buildingId,
+            floorNumber: parsed.data.floorNumber,
+          },
+        },
+      });
+      if (existing) {
+        throw new Error('This floor number already exists in this building.');
+      }
+
+      const created = await tx.floor.create({
+        data: {
           buildingId: parsed.data.buildingId,
           floorNumber: parsed.data.floorNumber,
+          name: parsed.data.name,
         },
-      },
-    });
-    if (existing) {
-      return { success: false, error: 'This floor number already exists in this building.' };
-    }
+      });
 
-    const floor = await prisma.floor.create({
-      data: {
-        buildingId: parsed.data.buildingId,
-        floorNumber: parsed.data.floorNumber,
-        name: parsed.data.name,
-      },
-    });
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'FLOOR_CREATE',
+          entity: 'Floor',
+          entityId: created.id,
+          newValues: { name: created.name, floorNumber: created.floorNumber, buildingId: created.buildingId },
+        },
+        tx
+      );
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'FLOOR_CREATE',
-      entity: 'Floor',
-      entityId: floor.id,
-      newValues: { name: floor.name, floorNumber: floor.floorNumber, buildingId: floor.buildingId },
+      return created;
     });
 
     revalidatePath('/admin/property');
@@ -247,34 +284,47 @@ export async function createRoomTypeAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const existing = await prisma.roomType.findUnique({
-      where: { code: parsed.data.code },
-    });
-    if (existing) {
-      return { success: false, error: 'A room type with this code already exists.' };
-    }
+    const roomType = await prisma.$transaction(async (tx) => {
+      const existing = await tx.roomType.findUnique({
+        where: { code: parsed.data.code },
+      });
+      if (existing) {
+        throw new Error('A room type with this code already exists.');
+      }
 
-    const roomType = await prisma.roomType.create({
-      data: {
-        name: parsed.data.name,
-        code: parsed.data.code,
-        description: parsed.data.description,
-        basePrice: parsed.data.basePrice,
-        maxOccupancy: parsed.data.maxOccupancy,
-        maxAdults: parsed.data.maxAdults,
-        maxChildren: parsed.data.maxChildren,
-        totalInventory: parsed.data.totalInventory,
-        displayOrder: parsed.data.displayOrder,
-        isActive: parsed.data.isActive,
-      },
-    });
+      const created = await tx.roomType.create({
+        data: {
+          name: parsed.data.name,
+          code: parsed.data.code,
+          description: parsed.data.description,
+          basePrice: parsed.data.basePrice,
+          maxOccupancy: parsed.data.maxOccupancy,
+          maxAdults: parsed.data.maxAdults,
+          maxChildren: parsed.data.maxChildren,
+          totalInventory: parsed.data.totalInventory,
+          displayOrder: parsed.data.displayOrder,
+          isActive: parsed.data.isActive,
+        },
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOM_TYPE_CREATE',
-      entity: 'RoomType',
-      entityId: roomType.id,
-      newValues: { code: roomType.code, name: roomType.name, basePrice: roomType.basePrice.toString() },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_TYPE_CREATE',
+          entity: 'RoomType',
+          entityId: created.id,
+          newValues: {
+            code: created.code,
+            name: created.name,
+            basePrice: created.basePrice.toString(),
+            maxOccupancy: created.maxOccupancy,
+            totalInventory: created.totalInventory,
+          },
+        },
+        tx
+      );
+
+      return created;
     });
 
     revalidatePath('/admin/rooms/types');
@@ -309,35 +359,60 @@ export async function updateRoomTypeAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const existing = await prisma.roomType.findUnique({
-      where: { id: parsed.data.roomTypeId },
-    });
-    if (!existing) {
-      return { success: false, error: 'Room type not found.' };
-    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.roomType.findUnique({
+        where: { id: parsed.data.roomTypeId },
+      });
+      if (!existing) {
+        throw new Error('Room type not found.');
+      }
 
-    const updated = await prisma.roomType.update({
-      where: { id: parsed.data.roomTypeId },
-      data: {
-        ...(parsed.data.name && { name: parsed.data.name }),
-        ...(parsed.data.description && { description: parsed.data.description }),
-        ...(parsed.data.basePrice !== undefined && { basePrice: parsed.data.basePrice }),
-        ...(parsed.data.maxOccupancy !== undefined && { maxOccupancy: parsed.data.maxOccupancy }),
-        ...(parsed.data.maxAdults !== undefined && { maxAdults: parsed.data.maxAdults }),
-        ...(parsed.data.maxChildren !== undefined && { maxChildren: parsed.data.maxChildren }),
-        ...(parsed.data.totalInventory !== undefined && { totalInventory: parsed.data.totalInventory }),
-        ...(parsed.data.displayOrder !== undefined && { displayOrder: parsed.data.displayOrder }),
-        ...(parsed.data.isActive !== undefined && { isActive: parsed.data.isActive }),
-      },
-    });
+      const roomType = await tx.roomType.update({
+        where: { id: parsed.data.roomTypeId },
+        data: {
+          ...(parsed.data.name && { name: parsed.data.name }),
+          ...(parsed.data.description && { description: parsed.data.description }),
+          ...(parsed.data.basePrice !== undefined && { basePrice: parsed.data.basePrice }),
+          ...(parsed.data.maxOccupancy !== undefined && { maxOccupancy: parsed.data.maxOccupancy }),
+          ...(parsed.data.maxAdults !== undefined && { maxAdults: parsed.data.maxAdults }),
+          ...(parsed.data.maxChildren !== undefined && { maxChildren: parsed.data.maxChildren }),
+          ...(parsed.data.totalInventory !== undefined && { totalInventory: parsed.data.totalInventory }),
+          ...(parsed.data.displayOrder !== undefined && { displayOrder: parsed.data.displayOrder }),
+          ...(parsed.data.isActive !== undefined && { isActive: parsed.data.isActive }),
+        },
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOM_TYPE_UPDATE',
-      entity: 'RoomType',
-      entityId: updated.id,
-      oldValues: { name: existing.name, basePrice: existing.basePrice.toString() },
-      newValues: { name: updated.name, basePrice: updated.basePrice.toString() },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_TYPE_UPDATE',
+          entity: 'RoomType',
+          entityId: roomType.id,
+          oldValues: {
+            name: existing.name,
+            description: existing.description,
+            basePrice: existing.basePrice.toString(),
+            maxOccupancy: existing.maxOccupancy,
+            maxAdults: existing.maxAdults,
+            maxChildren: existing.maxChildren,
+            totalInventory: existing.totalInventory,
+            isActive: existing.isActive,
+          },
+          newValues: {
+            name: roomType.name,
+            description: roomType.description,
+            basePrice: roomType.basePrice.toString(),
+            maxOccupancy: roomType.maxOccupancy,
+            maxAdults: roomType.maxAdults,
+            maxChildren: roomType.maxChildren,
+            totalInventory: roomType.totalInventory,
+            isActive: roomType.isActive,
+          },
+        },
+        tx
+      );
+
+      return roomType;
     });
 
     revalidatePath('/admin/rooms/types');
@@ -375,19 +450,26 @@ export async function generateRoomsAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const result = await executeBatchRoomGeneration(parsed.data, prisma);
+    const result = await prisma.$transaction(async (tx) => {
+      const genResult = await executeBatchRoomGeneration(parsed.data, tx);
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOMS_BATCH_GENERATE',
-      entity: 'Room',
-      entityId: parsed.data.propertyId,
-      newValues: {
-        createdCount: result.createdCount,
-        roomNumbers: result.roomNumbers,
-        floorId: parsed.data.floorId,
-        roomTypeId: parsed.data.roomTypeId,
-      },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOMS_BATCH_GENERATE',
+          entity: 'Room',
+          entityId: parsed.data.propertyId,
+          newValues: {
+            createdCount: genResult.createdCount,
+            roomNumbers: genResult.roomNumbers,
+            floorId: parsed.data.floorId,
+            roomTypeId: parsed.data.roomTypeId,
+          },
+        },
+        tx
+      );
+
+      return genResult;
     });
 
     revalidatePath('/admin/rooms');
@@ -422,35 +504,42 @@ export async function updateRoomStatusAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const room = await prisma.room.findUnique({
-      where: { id: parsed.data.roomId },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const room = await tx.room.findUnique({
+        where: { id: parsed.data.roomId },
+      });
 
-    if (!room) {
-      return { success: false, error: 'Room not found.' };
-    }
+      if (!room) {
+        throw new Error('Room not found.');
+      }
 
-    // Validate manual operational transition
-    const validation = validateManualStatusTransition(room.status, parsed.data.targetStatus);
-    if (!validation.allowed) {
-      return { success: false, error: validation.reason };
-    }
+      // Validate manual operational transition
+      const validation = validateManualStatusTransition(room.status, parsed.data.targetStatus);
+      if (!validation.allowed) {
+        throw new Error(validation.reason || 'INVALID_ROOM_STATUS_TRANSITION');
+      }
 
-    const updated = await prisma.room.update({
-      where: { id: parsed.data.roomId },
-      data: {
-        status: parsed.data.targetStatus,
-        ...(parsed.data.notes && { notes: parsed.data.notes }),
-      },
-    });
+      const roomUpdated = await tx.room.update({
+        where: { id: parsed.data.roomId },
+        data: {
+          status: parsed.data.targetStatus,
+          ...(parsed.data.notes && { notes: parsed.data.notes }),
+        },
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOM_STATUS_CHANGE',
-      entity: 'Room',
-      entityId: updated.id,
-      oldValues: { status: room.status },
-      newValues: { status: updated.status, notes: parsed.data.notes },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_STATUS_CHANGE',
+          entity: 'Room',
+          entityId: roomUpdated.id,
+          oldValues: { status: room.status, notes: room.notes },
+          newValues: { status: roomUpdated.status, notes: parsed.data.notes },
+        },
+        tx
+      );
+
+      return roomUpdated;
     });
 
     revalidatePath('/admin/rooms');
@@ -486,31 +575,38 @@ export async function createAmenityAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const existing = await prisma.amenity.findFirst({
-      where: {
-        OR: [{ code: parsed.data.code }, { name: parsed.data.name }],
-      },
-    });
-    if (existing) {
-      return { success: false, error: 'An amenity with this code or name already exists.' };
-    }
+    const amenity = await prisma.$transaction(async (tx) => {
+      const existing = await tx.amenity.findFirst({
+        where: {
+          OR: [{ code: parsed.data.code }, { name: parsed.data.name }],
+        },
+      });
+      if (existing) {
+        throw new Error('An amenity with this code or name already exists.');
+      }
 
-    const amenity = await prisma.amenity.create({
-      data: {
-        name: parsed.data.name,
-        code: parsed.data.code,
-        icon: parsed.data.icon,
-        description: parsed.data.description,
-        isActive: parsed.data.isActive,
-      },
-    });
+      const created = await tx.amenity.create({
+        data: {
+          name: parsed.data.name,
+          code: parsed.data.code,
+          icon: parsed.data.icon,
+          description: parsed.data.description,
+          isActive: parsed.data.isActive,
+        },
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'AMENITY_CREATE',
-      entity: 'Amenity',
-      entityId: amenity.id,
-      newValues: { name: amenity.name, code: amenity.code },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'AMENITY_CREATE',
+          entity: 'Amenity',
+          entityId: created.id,
+          newValues: { name: created.name, code: created.code, isActive: created.isActive },
+        },
+        tx
+      );
+
+      return created;
     });
 
     revalidatePath('/admin/rooms/types');
@@ -536,6 +632,13 @@ export async function updateRoomTypeAmenitiesAction(
     }
 
     await prisma.$transaction(async (tx) => {
+      // Find old amenity assignments for audit record
+      const oldAssignments = await tx.roomTypeAmenity.findMany({
+        where: { roomTypeId: parsed.data.roomTypeId },
+        select: { amenityId: true },
+      });
+      const oldAmenityIds = oldAssignments.map((a) => a.amenityId);
+
       // Clear existing assignments
       await tx.roomTypeAmenity.deleteMany({
         where: { roomTypeId: parsed.data.roomTypeId },
@@ -551,14 +654,18 @@ export async function updateRoomTypeAmenitiesAction(
           },
         });
       }
-    });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOM_TYPE_AMENITIES_UPDATE',
-      entity: 'RoomType',
-      entityId: parsed.data.roomTypeId,
-      newValues: { amenityCount: parsed.data.amenityIds.length, amenityIds: parsed.data.amenityIds },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_TYPE_AMENITIES_UPDATE',
+          entity: 'RoomType',
+          entityId: parsed.data.roomTypeId,
+          oldValues: { amenityCount: oldAmenityIds.length, amenityIds: oldAmenityIds },
+          newValues: { amenityCount: parsed.data.amenityIds.length, amenityIds: parsed.data.amenityIds },
+        },
+        tx
+      );
     });
 
     revalidatePath(`/admin/rooms/types/${parsed.data.roomTypeId}`);
@@ -587,31 +694,48 @@ export async function setRoomAmenityOverrideAction(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const override = await prisma.roomAmenityOverride.upsert({
-      where: {
-        roomId_amenityId: {
+    const override = await prisma.$transaction(async (tx) => {
+      const existing = await tx.roomAmenityOverride.findUnique({
+        where: {
+          roomId_amenityId: {
+            roomId: parsed.data.roomId,
+            amenityId: parsed.data.amenityId,
+          },
+        },
+      });
+
+      const res = await tx.roomAmenityOverride.upsert({
+        where: {
+          roomId_amenityId: {
+            roomId: parsed.data.roomId,
+            amenityId: parsed.data.amenityId,
+          },
+        },
+        update: {
+          hasAmenity: parsed.data.hasAmenity,
+          notes: parsed.data.notes || null,
+        },
+        create: {
           roomId: parsed.data.roomId,
           amenityId: parsed.data.amenityId,
+          hasAmenity: parsed.data.hasAmenity,
+          notes: parsed.data.notes || null,
         },
-      },
-      update: {
-        hasAmenity: parsed.data.hasAmenity,
-        notes: parsed.data.notes || null,
-      },
-      create: {
-        roomId: parsed.data.roomId,
-        amenityId: parsed.data.amenityId,
-        hasAmenity: parsed.data.hasAmenity,
-        notes: parsed.data.notes || null,
-      },
-    });
+      });
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'ROOM_AMENITY_OVERRIDE',
-      entity: 'RoomAmenityOverride',
-      entityId: `${parsed.data.roomId}:${parsed.data.amenityId}`,
-      newValues: { hasAmenity: override.hasAmenity, notes: override.notes },
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_AMENITY_OVERRIDE',
+          entity: 'RoomAmenityOverride',
+          entityId: `${parsed.data.roomId}:${parsed.data.amenityId}`,
+          oldValues: existing ? { hasAmenity: existing.hasAmenity, notes: existing.notes } : null,
+          newValues: { hasAmenity: res.hasAmenity, notes: res.notes },
+        },
+        tx
+      );
+
+      return res;
     });
 
     revalidatePath(`/admin/rooms/${parsed.data.roomId}`);

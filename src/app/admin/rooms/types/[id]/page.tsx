@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,21 @@ import { ArrowLeft, Save, Sparkles, Layers } from 'lucide-react';
 import { updateRoomTypeAction, updateRoomTypeAmenitiesAction } from '@/actions/pms';
 
 export const dynamic = 'force-dynamic';
+
+type RoomTypeDetail = Prisma.RoomTypeGetPayload<{
+  include: {
+    amenities: {
+      include: {
+        amenity: true;
+      };
+    };
+    _count: {
+      select: { rooms: true };
+    };
+  };
+}>;
+
+type AmenityItem = Prisma.AmenityGetPayload<{}>;
 
 interface RoomTypeDetailPageProps {
   params: Promise<{
@@ -19,8 +35,8 @@ export default async function RoomTypeDetailPage({ params }: RoomTypeDetailPageP
   await requirePermission('room:read');
   const { id } = await params;
 
-  let roomType: any = null;
-  let allAmenities: any[] = [];
+  let roomType: RoomTypeDetail | null = null;
+  let allAmenities: AmenityItem[] = [];
 
   try {
     [roomType, allAmenities] = await Promise.all([
@@ -50,7 +66,7 @@ export default async function RoomTypeDetailPage({ params }: RoomTypeDetailPageP
     notFound();
   }
 
-  const assignedAmenityIds = new Set(roomType.amenities.map((rta: any) => rta.amenityId));
+  const assignedAmenityIds = new Set(roomType.amenities.map((rta) => rta.amenityId));
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

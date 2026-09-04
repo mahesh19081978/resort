@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ import {
   Wrench,
   Ban,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 
 interface RoomsPageProps {
@@ -31,20 +33,49 @@ interface RoomsPageProps {
 
 export const dynamic = 'force-dynamic';
 
+type RoomTypeSelectItem = Prisma.RoomTypeGetPayload<{
+  select: { id: true; name: true; code: true };
+}>;
+
+type BuildingSelectItem = Prisma.BuildingGetPayload<{
+  select: { id: true; name: true; code: true };
+}>;
+
+type FloorSelectItem = Prisma.FloorGetPayload<{
+  select: { id: true; name: true; floorNumber: true; buildingId: true };
+}>;
+
+type RoomWithRelations = Prisma.RoomGetPayload<{
+  include: {
+    roomType: { select: { name: true; code: true; basePrice: true } };
+    floor: {
+      include: {
+        building: { select: { name: true; code: true } };
+      };
+    };
+    amenityOverrides: { select: { amenityId: true } };
+  };
+}>;
+
 export default async function RoomsPage({ searchParams }: RoomsPageProps) {
   await requirePermission('room:read');
   const params = await searchParams;
 
-  const statusFilter = params.status as PhysicalRoomStatus | undefined;
+  // Strict server-side filter validation: only allow legitimate PhysicalRoomStatus enum values
+  const validStatuses = Object.values(PhysicalRoomStatus);
+  const statusFilter = params.status && validStatuses.includes(params.status as PhysicalRoomStatus)
+    ? (params.status as PhysicalRoomStatus)
+    : undefined;
+
   const roomTypeId = params.roomTypeId;
   const buildingId = params.buildingId;
   const floorId = params.floorId;
   const query = params.q?.trim();
 
-  let rooms: any[] = [];
-  let roomTypes: any[] = [];
-  let buildings: any[] = [];
-  let floors: any[] = [];
+  let rooms: RoomWithRelations[] = [];
+  let roomTypes: RoomTypeSelectItem[] = [];
+  let buildings: BuildingSelectItem[] = [];
+  let floors: FloorSelectItem[] = [];
   const statusCounts: Record<string, number> = {};
 
   try {
@@ -64,7 +95,7 @@ export default async function RoomsPage({ searchParams }: RoomsPageProps) {
       }),
     ]);
 
-    const whereClause: any = {
+    const whereClause: Prisma.RoomWhereInput = {
       isActive: true,
       ...(statusFilter && { status: statusFilter }),
       ...(roomTypeId && { roomTypeId }),

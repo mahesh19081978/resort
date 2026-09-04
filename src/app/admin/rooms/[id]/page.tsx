@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,33 @@ import { PhysicalRoomStatus } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
+type RoomWithDetails = Prisma.RoomGetPayload<{
+  include: {
+    property: true;
+    floor: {
+      include: {
+        building: true;
+      };
+    };
+    roomType: {
+      include: {
+        amenities: {
+          include: {
+            amenity: true;
+          };
+        };
+      };
+    };
+    amenityOverrides: {
+      include: {
+        amenity: true;
+      };
+    };
+  };
+}>;
+
+type AmenityItem = Prisma.AmenityGetPayload<{}>;
+
 interface RoomDetailsPageProps {
   params: Promise<{
     id: string;
@@ -33,8 +61,8 @@ export default async function RoomDetailsPage({ params }: RoomDetailsPageProps) 
   await requirePermission('room:read');
   const { id } = await params;
 
-  let room: any = null;
-  let allAmenities: any[] = [];
+  let room: RoomWithDetails | null = null;
+  let allAmenities: AmenityItem[] = [];
 
   try {
     [room, allAmenities] = await Promise.all([

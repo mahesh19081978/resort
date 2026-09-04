@@ -81,9 +81,9 @@ export interface BatchGenerationParams {
  */
 export async function executeBatchRoomGeneration(
   params: BatchGenerationParams,
-  db: typeof prisma = prisma
+  db: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<{ createdCount: number; roomNumbers: string[] }> {
-  return await db.$transaction(async (tx) => {
+  const runner = async (tx: Prisma.TransactionClient) => {
     // 1. Cross-Property Integrity Verification:
     // Floor must exist and belong to a Building in this Property
     const floor = await tx.floor.findUnique({
@@ -123,23 +123,39 @@ export async function executeBatchRoomGeneration(
       );
     }
 
-    // 3. Deterministic Batch Creation
-    for (const roomNumber of collisionCheck.roomNumbers) {
-      await tx.room.create({
-        data: {
-          propertyId: params.propertyId,
-          floorId: params.floorId,
-          roomTypeId: params.roomTypeId,
-          roomNumber,
-          status: PhysicalRoomStatus.AVAILABLE,
-          notes: params.notes || null,
-        },
-      });
+    // 3. Deterministic Batch Creation with unique constraint safety
+    try {
+      for (const roomNumber of collisionCheck.roomNumbers) {
+        await tx.room.create({
+          data: {
+            propertyId: params.propertyId,
+            floorId: params.floorId,
+            roomTypeId: params.roomTypeId,
+            roomNumber,
+            status: PhysicalRoomStatus.AVAILABLE,
+            notes: params.notes || null,
+          },
+        });
+      }
+    } catch (createErr: unknown) {
+      // Intercept database unique constraint violation (Prisma P2002 or native unique error)
+      const err = createErr as { code?: string; message?: string };
+      if (err?.code === 'P2002' || (typeof err?.message === 'string' && err.message.includes('unique constraint'))) {
+        throw new Error(
+          'ROOM_NUMBER_ALREADY_EXISTS: Concurrent insert collision detected. Room numbers must be unique within the property.'
+        );
+      }
+      throw createErr;
     }
 
     return {
       createdCount: collisionCheck.roomNumbers.length,
       roomNumbers: collisionCheck.roomNumbers,
     };
-  });
+  };
+
+  if ('$transaction' in db && typeof db.$transaction === 'function') {
+    return await (db as typeof prisma).$transaction(runner);
+  }
+  return await runner(db as Prisma.TransactionClient);
 }

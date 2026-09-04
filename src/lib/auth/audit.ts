@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 
 export interface AuditEventParams {
   userId?: string | null;
@@ -13,15 +14,20 @@ export interface AuditEventParams {
 
 /**
  * Safely records a security or business audit event to the database.
- * Never throws an unhandled exception so business workflows are not disrupted if database logging fails.
+ * If a transaction client (`tx`) is provided, writes within the transaction so mutation + audit are atomic.
+ * If logging fails within a transaction, the error propagates so the entire transaction rolls back.
  */
-export async function recordAuditEvent(params: AuditEventParams): Promise<void> {
+export async function recordAuditEvent(
+  params: AuditEventParams,
+  tx?: Prisma.TransactionClient
+): Promise<void> {
+  const db = tx || prisma;
   try {
     // Exclude any accidentally passed password or secret keys
     const sanitizedOld = params.oldValues ? sanitizeValues(params.oldValues) : undefined;
     const sanitizedNew = params.newValues ? sanitizeValues(params.newValues) : undefined;
 
-    await prisma.auditLog.create({
+    await db.auditLog.create({
       data: {
         userId: params.userId || null,
         action: params.action,
@@ -34,6 +40,10 @@ export async function recordAuditEvent(params: AuditEventParams): Promise<void> 
       },
     });
   } catch (error) {
+    if (tx) {
+      // Within transaction: do not swallow error, rethrow to ensure rollback
+      throw error;
+    }
     // Silently log in server console if DB connection is offline (e.g. during placeholder setup)
     console.warn(`[AuditLog] Non-blocking audit record failed:`, (error as Error).message);
   }

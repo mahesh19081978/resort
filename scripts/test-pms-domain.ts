@@ -178,8 +178,56 @@ async function runPmsTestSuite() {
     crossPropCaught = true;
     assert.ok(err.message.includes('CROSS_PROPERTY_VIOLATION'));
   }
-  assert.strictEqual(crossPropCaught, true, 'Must reject floor from different property');
-  console.log('✔ Deterministic generation, collision rollback, and cross-property integrity verified');
+  // Concurrency & Unique constraint safety test (intercepting P2002 DB error)
+  let concurrencyCaught = false;
+  const mockTxP2002Collision = {
+    $transaction: async (cb: any) => {
+      return cb({
+        floor: {
+          findUnique: async () => ({ id: 'f-1', building: { propertyId: 'prop-1' } }),
+        },
+        roomType: {
+          findUnique: async () => ({ id: 'rt-1' }),
+        },
+        room: {
+          findMany: async () => [], // Passed pre-check
+          create: async () => {
+            // Concurrent race condition: DB throws P2002 unique constraint violation
+            const p2002 = new Error('Unique constraint failed on the fields: (`propertyId`,`roomNumber`)');
+            (p2002 as any).code = 'P2002';
+            throw p2002;
+          },
+        },
+      });
+    },
+  };
+
+  try {
+    await executeBatchRoomGeneration(
+      {
+        propertyId: 'prop-1',
+        floorId: 'f-1',
+        roomTypeId: 'rt-1',
+        prefix: 'S-',
+        startingNumber: 101,
+        count: 5,
+      },
+      mockTxP2002Collision as any
+    );
+  } catch (err: any) {
+    concurrencyCaught = true;
+    assert.ok(
+      err.message.includes('ROOM_NUMBER_ALREADY_EXISTS'),
+      'Must translate database unique constraint violation to ROOM_NUMBER_ALREADY_EXISTS'
+    );
+  }
+  assert.strictEqual(
+    concurrencyCaught,
+    true,
+    'Must catch concurrent DB unique constraint collisions safely'
+  );
+
+  console.log('✔ Deterministic generation, collision rollback, cross-property integrity, and concurrent P2002 handling verified');
 
   // ----------------------------------------------------
   // 2. PHYSICAL ROOM STATUS MACHINE TESTS

@@ -59,11 +59,19 @@ To maintain high concurrency, prevent race conditions, and support modern hospit
 
 ---
 
-## 4. Physical Rooms vs. Inventory Quotas
+## 4. Physical Rooms vs. Inventory Quotas & Intentional Global Scope of RoomType
 
+### Intentional Global Scope of RoomType
+In The Royal Reserve domain model, `RoomType` is **intentionally global**:
+- It does **not** have a `propertyId` foreign key in `prisma/schema.prisma`.
+- Instead, physical `Room` records bind a global catalog `RoomType` to a specific `Property` (`Room.propertyId` and `Room.roomTypeId`).
+- This intentional architectural decision enables brand-wide accommodation standard definitions, centralized marketing catalog management, and consistent rate plan structures across multi-wing resort properties.
+- When generating physical rooms (`executeBatchRoomGeneration`), the transaction verifies that `params.roomTypeId` points to an active valid `RoomType`, and links the resulting physical room directly to the selected `Property` and `Floor`.
+
+### Inventory Quota vs Physical Rooms
 - **Room Inventory (`RoomTypeInventory`)**: A date-wise ledger representing total sellable inventory, booked count, blocked units, and available quota for a `RoomType`. This prevents table locks on physical rooms during high-traffic online reservations.
 - **Physical Rooms (`Room`)**: Concrete physical inventory. The count of active physical rooms linked to a `RoomType` defines the theoretical capacity ceiling of that `RoomType`.
-- **Blocked Rooms**: Physical rooms in `OUT_OF_ORDER` or `OUT_OF_SERVICE` reduce the operational sellable capacity of that `RoomType`.
+- **Blocked Rooms**: Physical rooms in `OUT_OF_ORDER` reduce the operational sellable capacity of that `RoomType`. Rooms undergoing routine `MAINTENANCE` or `CLEANING` remain in inventory capacity planning.
 
 ---
 
@@ -101,7 +109,7 @@ Physical rooms and property structures follow strict audit and historical preser
 
 1. **Physical Rooms**:
    - Rooms that have historical stays, maintenance logs, or audit records **cannot be hard-deleted**.
-   - Instead, the room is set to `isActive = false` and transitioned to `OUT_OF_SERVICE`.
+   - Instead, the room is set to `isActive = false` and transitioned to `OUT_OF_ORDER`.
    - Inactive rooms do not count toward sellable room type capacity and are hidden from assignment pickers.
 2. **Room Types**:
    - Cannot be deleted if physical rooms or historical reservations are attached.

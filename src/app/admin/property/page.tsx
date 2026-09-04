@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,11 +9,32 @@ import { updatePropertyAction, createBuildingAction } from '@/actions/pms';
 
 export const dynamic = 'force-dynamic';
 
+type PropertyWithHierarchy = Prisma.PropertyGetPayload<{
+  include: {
+    buildings: {
+      include: {
+        floors: {
+          include: {
+            _count: {
+              select: { rooms: true };
+            };
+          };
+        };
+      };
+    };
+    _count: {
+      select: { rooms: true };
+    };
+  };
+}>;
+
+type BuildingItem = PropertyWithHierarchy['buildings'][number];
+
 export default async function PropertyPage() {
   await requirePermission('room:read');
 
-  let property: any = null;
-  let buildings: any[] = [];
+  let property: PropertyWithHierarchy | null = null;
+  let buildings: BuildingItem[] = [];
 
   try {
     property = await prisma.property.findFirst({
@@ -264,13 +286,13 @@ export default async function PropertyPage() {
                       </div>
                       <span className="text-xs text-resort-stone">
                         {b.floors.length} Floors &bull;{' '}
-                        {b.floors.reduce((sum: number, f: any) => sum + f._count.rooms, 0)} Rooms
+                        {b.floors.reduce((sum, f) => sum + f._count.rooms, 0)} Rooms
                       </span>
                     </div>
 
                     {/* Floor chips */}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {b.floors.map((f: any) => (
+                      {b.floors.map((f) => (
                         <span
                           key={f.id}
                           className="rounded-md bg-resort-ivory px-2 py-1 text-[11px] border border-resort-sand text-resort-charcoal"

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,11 +9,26 @@ import { createBuildingAction } from '@/actions/pms';
 
 export const dynamic = 'force-dynamic';
 
+type BuildingWithRelations = Prisma.BuildingGetPayload<{
+  include: {
+    property: { select: { name: true; code: true } };
+    floors: {
+      include: {
+        _count: { select: { rooms: true } };
+      };
+    };
+  };
+}>;
+
+type PropertySelectItem = Prisma.PropertyGetPayload<{
+  select: { id: true; name: true; code: true };
+}>;
+
 export default async function BuildingsPage() {
   await requirePermission('room:read');
 
-  let buildings: any[] = [];
-  let properties: any[] = [];
+  let buildings: BuildingWithRelations[] = [];
+  let properties: PropertySelectItem[] = [];
 
   try {
     [buildings, properties] = await Promise.all([
@@ -90,7 +106,7 @@ export default async function BuildingsPage() {
                         <td className="px-4 py-3">
                           <span className="font-semibold text-resort-charcoal">{b.floors.length}</span> floors &bull;{' '}
                           <span className="font-semibold text-resort-charcoal">
-                            {b.floors.reduce((sum: number, f: any) => sum + f._count.rooms, 0)}
+                            {b.floors.reduce((sum, f) => sum + f._count.rooms, 0)}
                           </span>{' '}
                           rooms
                         </td>

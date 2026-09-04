@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,12 +9,28 @@ import { generateRoomsAction } from '@/actions/pms';
 
 export const dynamic = 'force-dynamic';
 
+type PropertyItem = Prisma.PropertyGetPayload<{
+  select: { id: true; name: true; code: true };
+}>;
+
+type RoomTypeItem = Prisma.RoomTypeGetPayload<{
+  select: { id: true; name: true; code: true; basePrice: true };
+}>;
+
+type FloorWithBuilding = Prisma.FloorGetPayload<{
+  include: {
+    building: {
+      select: { name: true; code: true; propertyId: true };
+    };
+  };
+}>;
+
 export default async function GenerateRoomsPage() {
   await requirePermission('room:manage');
 
-  let properties: any[] = [];
-  let roomTypes: any[] = [];
-  let floors: any[] = [];
+  let properties: PropertyItem[] = [];
+  let roomTypes: RoomTypeItem[] = [];
+  let floors: FloorWithBuilding[] = [];
 
   try {
     [properties, roomTypes, floors] = await Promise.all([
