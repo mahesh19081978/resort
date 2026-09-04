@@ -16,3 +16,4 @@ export type BookingSearchInput = z.infer<typeof bookingSearchSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
 export * from './pms';
+export * from './frontdesk';

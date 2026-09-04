@@ -166,6 +166,13 @@ Amenities (Wi-Fi, AC, Geyser, Jacuzzi, Balcony, Safe) are modeled as distinct da
 * Sequence: PurchaseRequest -> Approval -> PurchaseOrder -> Vendor -> GoodsReceipt (GRN) -> PurchaseBill -> VendorPayment.
 * Native support for partial shipments, damaged item rejections, vendor credit notes, and outstanding vendor balances.
 
+### 4.9 Front Desk & Stay Lifecycle Operations (Phase 0.5)
+* **Stay Lifecycle Flow**: Reservation -> Guest ID & Webcam verification -> Physical Room Assignment -> Transactional Check-in -> In-House Stay -> Folio Settlement -> Checkout.
+* **Concurrency Protection**: Check-in re-verifies room availability inside `prisma.$transaction` ensuring two concurrent requests cannot assign or check into the same physical room.
+* **Workflow-Owned Status Transitions**: Check-in transitions physical room `AVAILABLE/RESERVED -> OCCUPIED`. Checkout transitions room `OCCUPIED -> DIRTY`. Manual status overrides cannot circumvent active stay assignments.
+* **Financial Ledger Discipline**: All stay billing flows through `Folio` with `Decimal(12, 2)` calculations (`totalCharges - totalCredits - totalPayments = totalBalance`). Checkout strictly enforces `totalBalance <= 0.00`.
+* **Advance vs Settlement**: Advance deposits are recorded as `PaymentContext.RESERVATION_ADVANCE` on the Reservation; checkout settlement payments are recorded as `PaymentContext.FOLIO_SETTLEMENT` on the Folio.
+
 ---
 
 ## 5. Authentication, RBAC & Security Strategy
