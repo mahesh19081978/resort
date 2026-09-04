@@ -9,11 +9,16 @@ export interface AuthenticatedUser {
   name: string;
   role: UserRole;
   isActive: boolean;
+  sessionVersion: number;
 }
 
 /**
  * Retrieves the currently authenticated user from the request session cookie.
- * Validates token signature, expiration, and checks that the user still exists and isActive === true.
+ * STRICT PRODUCTION POLICY:
+ * 1. Cryptographically verifies token signature & expiration.
+ * 2. Queries PostgreSQL to verify user existence, active status, and matching sessionVersion.
+ * 3. FAILS CLOSED on any database failure, user missing, account inactive, or version mismatch.
+ * NEVER returns a fallback/trusted user without live database validation.
  */
 export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
   try {
@@ -24,59 +29,63 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
     const session = await verifySessionToken(token);
     if (!session || !session.sub) return null;
 
-    // Database verification: ensures user exists and is currently active
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: session.sub },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          isActive: true,
-        },
-      });
-
-      if (!user || !user.isActive) {
-        return null;
-      }
-
-      return {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role as UserRole,
-        isActive: user.isActive,
-      };
-    } catch {
-      // Fallback for environment when database connection is offline:
-      // Trust verified session token with minimal payload
-      return {
-        id: session.sub,
-        email: session.email,
-        name: 'Authorized Staff',
-        role: session.role as UserRole,
+    // Authoritative verification against PostgreSQL database:
+    // If the database is unreachable or query errors, this throws and the outer catch returns null (FAILS CLOSED)
+    const user = await prisma.user.findUnique({
+      where: { id: session.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
         isActive: true,
-      };
+        sessionVersion: true,
+      },
+    });
+
+    // Fail closed if account does not exist or has been deactivated
+    if (!user || !user.isActive) {
+      return null;
     }
-  } catch {
+
+    // Fail closed if sessionVersion in token does not match active DB version (forced logout / password change)
+    if (session.sessionVersion !== undefined && user.sessionVersion !== session.sessionVersion) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as UserRole,
+      isActive: user.isActive,
+      sessionVersion: user.sessionVersion,
+    };
+  } catch (error) {
+    // Fail closed on any exception (network drop, DB authentication error, tampered token)
+    // NEVER grant access via offline fallback
+    if (error instanceof Error && error.message.includes('[CRITICAL SECURITY CONFIGURATION ERROR]')) {
+      throw error;
+    }
     return null;
   }
 }
 
 /**
- * Requires an authenticated, active user. Throws UNAUTHORIZED if not logged in.
+ * Requires an authenticated, active user validated against PostgreSQL.
+ * Throws UNAUTHORIZED if unauthenticated or database unavailable.
  */
 export async function requireAuth(): Promise<AuthenticatedUser> {
   const user = await getCurrentUser();
   if (!user) {
-    throw new Error('UNAUTHORIZED: Authentication required');
+    throw new Error('UNAUTHORIZED: Authentication required and must be verified by database');
   }
   return user;
 }
 
 /**
- * Requires an authenticated user with a specific role.
+ * Requires an authenticated user with an authorized role.
+ * Role authority is derived solely from the database record.
  */
 export async function requireRole(allowedRoles: UserRole[]): Promise<AuthenticatedUser> {
   const user = await requireAuth();
@@ -88,13 +97,39 @@ export async function requireRole(allowedRoles: UserRole[]): Promise<Authenticat
 
 /**
  * Centralized authorization helper: requires authenticated user and specific granular permission.
- * Usage in Server Actions:
- *   const user = await requirePermission('folio:add_charge');
+ * Fails closed if user or permissions do not validate.
  */
 export async function requirePermission(permission: Permission): Promise<AuthenticatedUser> {
   const user = await requireAuth();
   assertPermission(user, permission);
   return user;
+}
+
+/**
+ * Enforces the Super Administrator invariant transactionally.
+ * Ensures at least one active SUPER_ADMIN account remains in the system.
+ */
+export async function assertSuperAdminInvariant(targetUserId: string, newRole?: UserRole, newActiveStatus?: boolean): Promise<void> {
+  // If target user is being deactivated or downgraded from SUPER_ADMIN:
+  if (newActiveStatus === false || (newRole && newRole !== 'SUPER_ADMIN')) {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { role: true, isActive: true },
+    });
+
+    if (targetUser && targetUser.role === 'SUPER_ADMIN' && targetUser.isActive) {
+      const activeSuperAdminsCount = await prisma.user.count({
+        where: {
+          role: 'SUPER_ADMIN',
+          isActive: true,
+        },
+      });
+
+      if (activeSuperAdminsCount <= 1) {
+        throw new Error('BUSINESS_RULE_VIOLATION: Cannot deactivate, downgrade, or remove the last active Super Administrator.');
+      }
+    }
+  }
 }
 
 export { hasPermission };

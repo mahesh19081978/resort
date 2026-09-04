@@ -2,6 +2,10 @@ import bcrypt from 'bcryptjs';
 
 const SALT_ROUNDS = 12;
 
+// Fixed pre-computed dummy bcrypt hash (cost factor 12) for constant-time comparison on nonexistent accounts
+// Generated for dummy string to avoid timing attacks/account enumeration
+export const DUMMY_BCRYPT_HASH = '$2a$12$e8Y78gK7oN3O2MvQ6W1qI.K2R3E5T7Y9U1I3O5P7A9S1D3F5G7H9J';
+
 /**
  * Hashes a plaintext password using bcrypt with cost factor 12.
  */

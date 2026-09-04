@@ -276,6 +276,7 @@ model User {
   roleEntity       Role?             @relation(fields: [roleEntityId], references: [id])
   passwordHash     String            @default("")
   isActive         Boolean           @default(true)
+  sessionVersion   Int               @default(1)
   lastLoginAt      DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt

@@ -51,8 +51,8 @@ export default function AdminLoginPage() {
                   id="email-input"
                   name="email"
                   type="email"
-                  placeholder="admin@royalreserve.com"
-                  defaultValue="admin@royalreserve.com"
+                  placeholder="name@royalreserve.com"
+                  defaultValue=""
                   required
                   autoComplete="email"
                   disabled={isPending}
@@ -75,7 +75,7 @@ export default function AdminLoginPage() {
                   name="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••••••"
-                  defaultValue="password123"
+                  defaultValue=""
                   required
                   autoComplete="current-password"
                   disabled={isPending}

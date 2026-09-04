@@ -34,6 +34,7 @@ export type Permission =
   | 'kitchen:update_kot'
   // Inventory & Store
   | 'inventory:read'
+  | 'inventory:issue'
   | 'inventory:adjust'
   | 'inventory:transfer'
   | 'inventory:count'
@@ -58,7 +59,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'room:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
     'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view', 'kitchen:update_kot',
-    'inventory:read', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
     'user:manage', 'role:manage', 'reports:financial', 'reports:operational',
@@ -70,7 +71,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'room:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
     'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view',
-    'inventory:read', 'inventory:adjust', 'inventory:transfer',
+    'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
     'reports:financial', 'reports:operational', 'content:manage', 'audit:read',
@@ -92,7 +93,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'kitchen:view', 'kitchen:update_kot',
   ],
   STORE_MANAGER: [
-    'inventory:read', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'procurement:grn:receive',
   ],
   PURCHASE_MANAGER: [

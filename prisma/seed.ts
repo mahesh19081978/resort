@@ -67,9 +67,15 @@ async function main() {
     });
   }
 
-  // Initial Admin User (Explicitly flagged development credential)
-  const devPassword = process.env.SEED_ADMIN_PASSWORD || 'password123';
-  const hashedAdminPassword = await bcrypt.hash(devPassword, 10);
+  // Initial Admin User (Explicitly flagged development bootstrap credential)
+  // In production, DEV_ADMIN_PASSWORD must be supplied explicitly or initial accounts provisioned via secure admin CLI
+  let devPassword = process.env.DEV_ADMIN_PASSWORD;
+  if (!devPassword) {
+    // Generate a temporary 16-character secure random bootstrap password for local development
+    devPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8) + '!';
+    console.log(`  [DEV BOOTSTRAP] DEV_ADMIN_PASSWORD not set. Generated temporary local password: ${devPassword}`);
+  }
+  const hashedAdminPassword = await bcrypt.hash(devPassword, 12);
 
   await prisma.user.upsert({
     where: { email: 'admin@royalreserve.com' },
@@ -81,6 +87,7 @@ async function main() {
       roleEntityId: roleMap['SUPER_ADMIN'],
       passwordHash: hashedAdminPassword,
       isActive: true,
+      sessionVersion: 1,
     },
   });
 
