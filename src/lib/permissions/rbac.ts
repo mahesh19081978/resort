@@ -20,7 +20,9 @@ export type Permission =
   | 'folio:read'
   | 'folio:update'
   | 'folio:settle'
+  | 'room:read'
   | 'room:manage'
+  | 'property:manage'
   | 'guest:read'
   | 'guest:manage'
   | 'guest:view_sensitive'
@@ -56,7 +58,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
-    'room:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
+    'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
     'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view', 'kitchen:update_kot',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
@@ -68,7 +70,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   ADMIN: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
-    'room:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
+    'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
     'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer',
@@ -79,7 +81,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   RECEPTIONIST: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
-    'guest:read', 'guest:manage',
+    'room:read', 'guest:read', 'guest:manage',
   ],
   RESTAURANT_MANAGER: [
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',

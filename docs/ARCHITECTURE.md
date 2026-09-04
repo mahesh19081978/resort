@@ -57,9 +57,16 @@ src/
 │   │   ├── login/                # Staff authentication
 │   │   ├── dashboard/            # Real-time operational overview
 │   │   ├── bookings/             # PMS reservation management
-│   │   ├── rooms/                # Physical rooms & room types
 │   │   ├── frontdesk/            # Check-in, webcam capture, ID verification
 │   │   ├── folios/               # Running guest folio ledger
+│   │   ├── property/             # Property, buildings, floors management
+│   │   │   ├── buildings/        # Building wings and blocks
+│   │   │   └── floors/           # Structural floor levels
+│   │   ├── rooms/                # Physical rooms grid & operational status
+│   │   │   ├── [id]/             # Physical room detail & amenity overrides
+│   │   │   ├── generate/         # Deterministic batch room generator
+│   │   │   └── types/            # Room types catalog & defaults
+│   │   │       └── [id]/         # Room type specs & amenity mapping
 │   │   ├── restaurant/           # Table map, POS, KOT lifecycle
 │   │   ├── inventory/            # Multi-department stock ledger
 │   │   ├── procurement/          # PO, GRN, vendor payables
