@@ -17,3 +17,4 @@ export type LoginInput = z.infer<typeof loginSchema>;
 
 export * from './pms';
 export * from './frontdesk';
+export * from './restaurant';

@@ -30,10 +30,16 @@ export type Permission =
   | 'restaurant:order:create'
   | 'restaurant:order:read'
   | 'restaurant:order:update'
+  | 'restaurant:order:cancel'
   | 'restaurant:table:manage'
+  | 'restaurant:bill:create'
   | 'restaurant:bill:settle'
+  | 'restaurant:bill:void'
+  | 'restaurant:room-charge'
   | 'kitchen:view'
   | 'kitchen:update_kot'
+  | 'recipe:read'
+  | 'recipe:manage'
   // Inventory & Store
   | 'inventory:read'
   | 'inventory:issue'
@@ -59,8 +65,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
     'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
-    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
-    'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view', 'kitchen:update_kot',
+    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
+    'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
+    'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
@@ -71,8 +78,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
     'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
-    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
-    'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view',
+    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
+    'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
+    'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
@@ -82,20 +90,25 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
     'room:read', 'guest:read', 'guest:manage',
+    'restaurant:order:read', 'restaurant:order:create', 'restaurant:room-charge',
   ],
   RESTAURANT_MANAGER: [
-    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
-    'restaurant:table:manage', 'restaurant:bill:settle', 'kitchen:view', 'inventory:read',
-    'reports:operational',
+    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
+    'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
+    'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
+    'inventory:read', 'reports:operational',
   ],
   RESTAURANT_BILLER: [
-    'restaurant:order:create', 'restaurant:order:read', 'restaurant:bill:settle',
+    'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
+    'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:room-charge',
+    'restaurant:table:manage',
   ],
   KITCHEN_STAFF: [
     'kitchen:view', 'kitchen:update_kot',
   ],
   STORE_MANAGER: [
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'recipe:read',
     'procurement:grn:receive',
   ],
   PURCHASE_MANAGER: [

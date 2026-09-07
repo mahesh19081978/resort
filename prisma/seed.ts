@@ -77,9 +77,21 @@ async function main() {
   }
   const hashedAdminPassword = await bcrypt.hash(devPassword, 12);
 
+  // In production (NODE_ENV === 'production'), never overwrite an existing administrator password
+  // Only update password in development or if DEV_ADMIN_PASSWORD is explicitly defined in non-production
+  const isProduction = process.env.NODE_ENV === 'production';
+  const shouldUpdateExistingPassword = !isProduction && Boolean(process.env.DEV_ADMIN_PASSWORD);
+
   await prisma.user.upsert({
     where: { email: 'admin@royalreserve.com' },
-    update: {},
+    update: shouldUpdateExistingPassword
+      ? {
+          passwordHash: hashedAdminPassword,
+          isActive: true,
+        }
+      : {
+          isActive: true,
+        },
     create: {
       email: 'admin@royalreserve.com',
       name: 'Executive General Manager',
@@ -348,63 +360,223 @@ async function main() {
     });
   }
 
-  const catKebabs = await prisma.menuCategory.upsert({
-    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Clay Oven & Tandoor Kebabs' } },
+  const catStarters = await prisma.menuCategory.upsert({
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Starters' } },
     update: {},
     create: {
       restaurantId: restaurant.id,
-      name: 'Clay Oven & Tandoor Kebabs',
+      name: 'Starters',
       displayOrder: 1,
     },
   });
 
   const catMains = await prisma.menuCategory.upsert({
-    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Regional Curries & Biryani' } },
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Main Course' } },
     update: {},
     create: {
       restaurantId: restaurant.id,
-      name: 'Regional Curries & Biryani',
+      name: 'Main Course',
       displayOrder: 2,
     },
   });
 
-  const catBeverages = await prisma.menuCategory.upsert({
-    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Cold Pressed Juices & Brews' } },
+  const catBreads = await prisma.menuCategory.upsert({
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Breads' } },
     update: {},
     create: {
       restaurantId: restaurant.id,
-      name: 'Cold Pressed Juices & Brews',
+      name: 'Breads',
       displayOrder: 3,
     },
   });
 
-  const itemPaneer = await prisma.menuItem.upsert({
-    where: { code: 'FNB-KBB-01' },
+  const catRice = await prisma.menuCategory.upsert({
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Rice' } },
     update: {},
     create: {
-      categoryId: catKebabs.id,
+      restaurantId: restaurant.id,
+      name: 'Rice',
+      displayOrder: 4,
+    },
+  });
+
+  const catBeverages = await prisma.menuCategory.upsert({
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Beverages' } },
+    update: {},
+    create: {
+      restaurantId: restaurant.id,
+      name: 'Beverages',
+      displayOrder: 5,
+    },
+  });
+
+  const catDesserts = await prisma.menuCategory.upsert({
+    where: { restaurantId_name: { restaurantId: restaurant.id, name: 'Desserts' } },
+    update: {},
+    create: {
+      restaurantId: restaurant.id,
+      name: 'Desserts',
+      displayOrder: 6,
+    },
+  });
+
+  const itemPaneer = await prisma.menuItem.upsert({
+    where: { code: 'FNB-STR-01' },
+    update: { kitchenStation: 'Tandoor' },
+    create: {
+      categoryId: catStarters.id,
       name: 'Charcoal Smoked Malai Paneer Tikka',
-      code: 'FNB-KBB-01',
+      code: 'FNB-STR-01',
       description: 'Fresh farm cottage cheese marinated in hung curd, green cardamom and mild spices.',
       price: 450.00,
       taxRate: 5.00,
       isVegetarian: true,
       isAvailable: true,
+      kitchenStation: 'Tandoor',
+    },
+  });
+
+  const itemChickenTikka = await prisma.menuItem.upsert({
+    where: { code: 'FNB-STR-02' },
+    update: { kitchenStation: 'Tandoor' },
+    create: {
+      categoryId: catStarters.id,
+      name: 'Murgh Angara Tikka',
+      code: 'FNB-STR-02',
+      description: 'Spicy charred boneless chicken roasted in charcoal clay tandoor.',
+      price: 520.00,
+      taxRate: 5.00,
+      isVegetarian: false,
+      isAvailable: true,
+      kitchenStation: 'Tandoor',
+    },
+  });
+
+  const itemDalMakhani = await prisma.menuItem.upsert({
+    where: { code: 'FNB-MAIN-01' },
+    update: { kitchenStation: 'Curry Station' },
+    create: {
+      categoryId: catMains.id,
+      name: 'Slow Cooked Dal Makhani',
+      code: 'FNB-MAIN-01',
+      description: 'Black lentils slow cooked overnight on charcoal tandoor with churned butter and cream.',
+      price: 380.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Curry Station',
+    },
+  });
+
+  const itemButterChicken = await prisma.menuItem.upsert({
+    where: { code: 'FNB-MAIN-02' },
+    update: { kitchenStation: 'Curry Station' },
+    create: {
+      categoryId: catMains.id,
+      name: 'Old Delhi Butter Chicken',
+      code: 'FNB-MAIN-02',
+      description: 'Tandoori chicken simmered in rich satin tomato and cashew nut gravy.',
+      price: 620.00,
+      taxRate: 5.00,
+      isVegetarian: false,
+      isAvailable: true,
+      kitchenStation: 'Curry Station',
+    },
+  });
+
+  const itemButterNaan = await prisma.menuItem.upsert({
+    where: { code: 'FNB-BRD-01' },
+    update: { kitchenStation: 'Tandoor' },
+    create: {
+      categoryId: catBreads.id,
+      name: 'Butter Garlic Naan',
+      code: 'FNB-BRD-01',
+      description: 'Refined flour flatbread brushed with crushed garlic and melted dairy butter.',
+      price: 90.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Tandoor',
+    },
+  });
+
+  const itemRoti = await prisma.menuItem.upsert({
+    where: { code: 'FNB-BRD-02' },
+    update: { kitchenStation: 'Tandoor' },
+    create: {
+      categoryId: catBreads.id,
+      name: 'Tandoori Roti (Whole Wheat)',
+      code: 'FNB-BRD-02',
+      description: 'Crisp whole wheat traditional unleavened Indian bread.',
+      price: 50.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Tandoor',
     },
   });
 
   const itemBiryani = await prisma.menuItem.upsert({
-    where: { code: 'FNB-MAIN-01' },
-    update: {},
+    where: { code: 'FNB-RICE-01' },
+    update: { kitchenStation: 'Curry Station' },
     create: {
-      categoryId: catMains.id,
+      categoryId: catRice.id,
       name: 'Malabar Dum Chicken Biryani',
-      code: 'FNB-MAIN-01',
+      code: 'FNB-RICE-01',
       description: 'Fragrant Kaima rice cooked with country chicken, fried shallots and local spices.',
       price: 580.00,
       taxRate: 5.00,
       isVegetarian: false,
       isAvailable: true,
+      kitchenStation: 'Curry Station',
+    },
+  });
+
+  const itemJeeraRice = await prisma.menuItem.upsert({
+    where: { code: 'FNB-RICE-02' },
+    update: { kitchenStation: 'Curry Station' },
+    create: {
+      categoryId: catRice.id,
+      name: 'Ghee Cumin Basmati Rice',
+      code: 'FNB-RICE-02',
+      description: 'Aged long-grain basmati tempered with roasted cumin seeds and desi cow ghee.',
+      price: 260.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Curry Station',
+    },
+  });
+
+  const itemLassi = await prisma.menuItem.upsert({
+    where: { code: 'FNB-BEV-01' },
+    update: { kitchenStation: 'Pantry' },
+    create: {
+      categoryId: catBeverages.id,
+      name: 'Kesariya Malai Lassi',
+      code: 'FNB-BEV-01',
+      description: 'Chilled sweet churned yogurt blended with saffron, pistachio and clotted cream.',
+      price: 180.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Pantry',
+    },
+  });
+
+  const itemGulabJamun = await prisma.menuItem.upsert({
+    where: { code: 'FNB-DES-01' },
+    update: { kitchenStation: 'Pantry' },
+    create: {
+      categoryId: catDesserts.id,
+      name: 'Warm Shahi Gulab Jamun (2 Pcs)',
+      code: 'FNB-DES-01',
+      description: 'Fried milk dumplings dipped in fragrant saffron, rose water and cardamom sugar syrup.',
+      price: 160.00,
+      taxRate: 5.00,
+      isVegetarian: true,
+      isAvailable: true,
+      kitchenStation: 'Pantry',
     },
   });
 

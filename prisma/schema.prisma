@@ -763,6 +763,8 @@ model FolioItem {
   
   restaurantOrderId String?
   restaurantOrder   RestaurantOrder? @relation(fields: [restaurantOrderId], references: [id], onDelete: SetNull)
+  restaurantBillId  String?          @unique
+  restaurantBill    RestaurantBill?  @relation(fields: [restaurantBillId], references: [id], onDelete: SetNull)
   serviceRequestId  String?
   serviceRequest    ServiceRequest?  @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
   
@@ -805,6 +807,7 @@ model Payment {
   receivedBy            User?           @relation("PaymentReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
   paymentDate           DateTime        @default(now())
   notes                 String?
+  idempotencyKey        String?         @unique
   
   refunds               Refund[]
   createdAt             DateTime        @default(now())
@@ -920,10 +923,11 @@ model MenuItem {
   code         String                @unique
   description  String?
   price        Decimal               @db.Decimal(10, 2)
-  taxRate      Decimal               @default(5.00) @db.Decimal(5, 2)
-  isVegetarian Boolean               @default(true)
-  isAvailable  Boolean               @default(true)
-  imageUrl     String?
+  taxRate        Decimal               @default(5.00) @db.Decimal(5, 2)
+  isVegetarian   Boolean               @default(true)
+  isAvailable    Boolean               @default(true)
+  kitchenStation String?               @default("MAIN_KITCHEN")
+  imageUrl       String?
   
   orderItems   RestaurantOrderItem[]
   kotItems     KOTItem[]
@@ -977,10 +981,11 @@ model RestaurantOrderItem {
   quantity   Int             @default(1)
   unitPrice  Decimal         @db.Decimal(10, 2)
   taxRate    Decimal         @default(5.00) @db.Decimal(5, 2)
-  notes      String?
-  kotItems   KOTItem[]
+  notes           String?
+  kotItems        KOTItem[]
+  billAllocations RestaurantBillAllocation[]
   
-  createdAt  DateTime        @default(now())
+  createdAt       DateTime        @default(now())
 
   @@index([orderId])
   @@index([menuItemId])
@@ -996,6 +1001,10 @@ model KOT {
   serverUser   User?           @relation("KOTServer", fields: [serverUserId], references: [id], onDelete: SetNull)
   kitchenNote  String?
   items        KOTItem[]
+  
+  preparedAt   DateTime?
+  readyAt      DateTime?
+  servedAt     DateTime?
   
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
@@ -1039,6 +1048,9 @@ model RestaurantBill {
   splitType      SplitType?
   
   payments       Payment[]
+  folioItem      FolioItem?
+  items          RestaurantBillItem[]
+  allocations    RestaurantBillAllocation[]
   
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -1046,6 +1058,35 @@ model RestaurantBill {
   @@index([billNumber])
   @@index([orderId])
   @@index([status])
+}
+
+model RestaurantBillItem {
+  id          String              @id @default(cuid())
+  billId      String
+  bill        RestaurantBill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int                 @default(1)
+  unitPrice   Decimal             @db.Decimal(10, 2)
+  taxRate     Decimal             @db.Decimal(5, 2)
+  amount      Decimal             @db.Decimal(12, 2)
+  createdAt   DateTime            @default(now())
+
+  @@index([billId])
+}
+
+model RestaurantBillAllocation {
+  id                String              @id @default(cuid())
+  billId            String
+  bill              RestaurantBill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  orderItemId       String?
+  orderItem         RestaurantOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  allocatedQuantity Int                 @default(1)
+  allocatedAmount   Decimal             @db.Decimal(12, 2)
+  taxAmount         Decimal             @default(0.00) @db.Decimal(12, 2)
+  createdAt         DateTime            @default(now())
+
+  @@index([billId])
+  @@index([orderItemId])
 }
 // ==========================================
 // 11. INVENTORY & STOCK LEDGER

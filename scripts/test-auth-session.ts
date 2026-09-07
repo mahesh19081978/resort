@@ -52,9 +52,77 @@ async function testAuthSession() {
   console.log('? Tampered token safely rejected (fail closed)');
 
   console.log('--- ALL AUTH & SESSION VERIFICATIONS PASSED ---');
+
+  // 6. Live Database & HTTP Verification
+  console.log('--- Starting Live Neon DB & HTTP Verification ---');
+  const { prisma } = await import('../src/lib/db/prisma');
+
+  const admin = await prisma.user.findUnique({ where: { email: 'admin@royalreserve.com' } });
+  assert.ok(admin !== null, 'Admin must exist in Neon database');
+  console.log('✔ Neon DB User Verified: ID = ' + admin.id + ', Role = ' + admin.role + ', SessionVersion = ' + admin.sessionVersion);
+
+  const pwdMatch = await verifyPassword('12345678', admin.passwordHash);
+  assert.strictEqual(pwdMatch, true, 'verifyPassword for 12345678 must return true');
+  console.log('✔ Live Admin Password match: true');
+
+  // Unauthenticated HTTP checks
+  const unauthDash = await fetch('http://localhost:3001/admin/dashboard', { redirect: 'manual' });
+  assert.strictEqual(unauthDash.status, 307, 'Unauthenticated dashboard must redirect (307)');
+  console.log('✔ GET /admin/dashboard (unauthenticated) -> 307 to: ' + unauthDash.headers.get('location'));
+
+  const unauthFrontdesk = await fetch('http://localhost:3001/admin/frontdesk', { redirect: 'manual' });
+  assert.strictEqual(unauthFrontdesk.status, 307, 'Unauthenticated frontdesk must redirect (307)');
+  console.log('✔ GET /admin/frontdesk (unauthenticated) -> 307 to: ' + unauthFrontdesk.headers.get('location'));
+
+  // Isolated Login Page check
+  const loginRes = await fetch('http://localhost:3001/admin/login');
+  assert.strictEqual(loginRes.status, 200, 'Login page must return 200 OK');
+  const loginHtml = await loginRes.text();
+  assert.ok(loginHtml.includes('Staff Management Portal'), 'Login page must contain portal title');
+  assert.strictEqual(loginHtml.includes('AdminSidebar'), false, 'Login page must NOT contain AdminSidebar');
+  console.log('✔ GET /admin/login -> 200 OK, standalone login page without AdminSidebar');
+
+  // Authenticated HTTP checks
+  const liveToken = await createSessionToken({
+    sub: admin.id,
+    email: admin.email,
+    sessionVersion: admin.sessionVersion,
+    role: admin.role,
+  });
+
+  const authDash = await fetch('http://localhost:3001/admin/dashboard', {
+    headers: { Cookie: 'resort_session=' + liveToken },
+    redirect: 'manual'
+  });
+  assert.strictEqual(authDash.status, 200, 'Authenticated dashboard must return 200 OK');
+  console.log('✔ GET /admin/dashboard (authenticated with session cookie) -> 200 OK');
+
+  const authFrontdesk = await fetch('http://localhost:3001/admin/frontdesk', {
+    headers: { Cookie: 'resort_session=' + liveToken },
+    redirect: 'manual'
+  });
+  assert.strictEqual(authFrontdesk.status, 200, 'Authenticated frontdesk must return 200 OK');
+  console.log('✔ GET /admin/frontdesk (authenticated with session cookie) -> 200 OK');
+
+  const authBookings = await fetch('http://localhost:3001/admin/bookings', {
+    headers: { Cookie: 'resort_session=' + liveToken },
+    redirect: 'manual'
+  });
+  assert.strictEqual(authBookings.status, 200, 'Authenticated bookings must return 200 OK');
+  console.log('✔ GET /admin/bookings (authenticated with session cookie) -> 200 OK');
+
+  const authLogin = await fetch('http://localhost:3001/admin/login', {
+    headers: { Cookie: 'resort_session=' + liveToken },
+    redirect: 'manual'
+  });
+  assert.strictEqual(authLogin.status, 307, 'Authenticated user accessing /admin/login must redirect (307)');
+  console.log('✔ GET /admin/login (authenticated) -> 307 to: ' + authLogin.headers.get('location'));
+
+  console.log('--- ALL LIVE NEON DB & E2E HTTP VERIFICATIONS PASSED ---');
 }
 
 testAuthSession().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
