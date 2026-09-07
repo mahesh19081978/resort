@@ -34,7 +34,7 @@ import {
   postBillToRoomCharge,
   splitRestaurantBill,
 } from '@/lib/restaurant/billing-service';
-import { deductOrderRecipeStock } from '@/lib/restaurant/recipe-service';
+import { consumeKOTInventory } from '@/lib/inventory/consumption-service';
 
 export interface ActionResponse<T = unknown> {
   success: boolean;
@@ -271,28 +271,28 @@ export async function updateKOTStatusAction(
       userId: user.id,
     });
 
-    // Optional Phase 0.6 Inventory Boundary trigger when KOT is marked SERVED
+    // Phase 0.7 Hardened KOT Served-Delta Inventory Consumption
     if (status === 'SERVED') {
       try {
-        const kot = await prisma.kOT.findUnique({
-          where: { id: kotId },
-          select: { orderId: true },
+        await consumeKOTInventory({
+          kotId,
+          userId: user.id,
         });
-        if (kot?.orderId) {
-          await deductOrderRecipeStock({
-            orderId: kot.orderId,
-            userId: user.id,
-          });
-        }
       } catch (e) {
-        console.warn('[RecipeBOM] Non-blocking inventory stock movement deduction warning:', e);
+        console.warn('[RecipeBOM] Non-blocking KOT inventory stock consumption warning:', e);
       }
     }
 
     revalidatePath('/admin/restaurant');
     revalidatePath('/admin/restaurant/kitchen');
     revalidatePath('/admin/restaurant/orders');
-    return { success: true, data: result };
+    return {
+      success: true,
+      data: {
+        kotId: result.kot.id,
+        status: result.kot.status,
+      },
+    };
   } catch (error) {
     return {
       success: false,

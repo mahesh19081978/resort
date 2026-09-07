@@ -19,7 +19,7 @@ import {
   splitRestaurantBill,
   calculateOrderFinancials,
 } from '../src/lib/restaurant/billing-service';
-import { deductOrderRecipeStock } from '../src/lib/restaurant/recipe-service';
+import { consumeKOTInventory } from '../src/lib/inventory/consumption-service';
 import {
   OrderType,
   OrderStatus,
@@ -517,16 +517,24 @@ async function runTests() {
         restaurantId: restaurant.id,
         orderType: OrderType.TAKE_AWAY,
         items: [{ menuItemId: recipeItem.id, quantity: 2 }],
-        fireKOTImmediately: false,
+        fireKOTImmediately: true,
       });
 
-      const deductRes = await deductOrderRecipeStock({ orderId: bomOrder.order.id });
+      const kotId = bomOrder.kot?.id;
+      assert(Boolean(kotId), 'KOT generated for BOM consumption test');
+
+      // In Phase 0.7, inventory consumption occurs when KOT reaches SERVED
+      await updateKOTStatus({ kotId: kotId!, status: 'PREPARING' });
+      await updateKOTStatus({ kotId: kotId!, status: 'READY' });
+      await updateKOTStatus({ kotId: kotId!, status: 'SERVED' });
+
+      const deductRes = await consumeKOTInventory({ kotId: kotId! });
       assert(
-        deductRes.success && deductRes.deductions.length > 0,
-        `Recipe BOM calculation triggered StockMovement deduction (${deductRes.deductions.length} ingredients)`
+        deductRes.success && deductRes.consumptions.length > 0,
+        `Recipe BOM calculation triggered StockMovement deduction (${deductRes.consumptions.length} items)`
       );
     } else {
-      console.log('  ?? SKIP: No menu item with recipe found for BOM test.');
+      console.log('  ⚠️ SKIP: No menu item with recipe found for BOM test.');
     }
 
     // -------------------------------------------------------------

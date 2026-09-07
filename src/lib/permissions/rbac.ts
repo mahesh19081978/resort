@@ -46,6 +46,16 @@ export type Permission =
   | 'inventory:adjust'
   | 'inventory:transfer'
   | 'inventory:count'
+  | 'inventory:item:manage'
+  | 'inventory:stock:issue'
+  | 'inventory:stock:transfer'
+  | 'inventory:stock:adjust'
+  | 'inventory:stock:wastage'
+  | 'inventory:count:create'
+  | 'inventory:count:approve'
+  | 'inventory:count:post'
+  | 'inventory:opening-balance:create'
+  | 'inventory:report:view'
   // Procurement
   | 'procurement:request:create'
   | 'procurement:order:create'
@@ -69,6 +79,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
+    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:opening-balance:create', 'inventory:report:view',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
     'user:manage', 'role:manage', 'reports:financial', 'reports:operational',
@@ -81,7 +94,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
-    'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer',
+    'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
+    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:opening-balance:create', 'inventory:report:view',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
     'reports:financial', 'reports:operational', 'content:manage', 'audit:read',
@@ -96,7 +112,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
-    'inventory:read', 'reports:operational',
+    'inventory:read', 'inventory:stock:issue', 'inventory:stock:wastage', 'reports:operational',
   ],
   RESTAURANT_BILLER: [
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
@@ -104,15 +120,19 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:table:manage',
   ],
   KITCHEN_STAFF: [
-    'kitchen:view', 'kitchen:update_kot',
+    'kitchen:view', 'kitchen:update_kot', 'inventory:stock:wastage',
   ],
   STORE_MANAGER: [
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
+    'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
+    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:opening-balance:create', 'inventory:report:view',
     'recipe:read',
     'procurement:grn:receive',
   ],
   PURCHASE_MANAGER: [
-    'inventory:read', 'procurement:request:create', 'procurement:order:create',
+    'inventory:read', 'inventory:report:view',
+    'procurement:request:create', 'procurement:order:create',
     'procurement:bill:process', 'vendor:manage', 'reports:operational',
   ],
   CONTENT_MANAGER: [
