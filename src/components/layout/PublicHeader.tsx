@@ -63,7 +63,7 @@ export function PublicFooter() {
       <div className="container mx-auto px-6 py-12">
         <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
           <div className="space-y-3">
-            <h3 className="font-serif text-lg font-semibold text-resort-gold">The Royal Reserve</h3>
+            <h3 className="font-serif text-lg font-semibold text-resort-gold">Infinity Resort</h3>
             <p className="text-xs text-resort-stone leading-relaxed">
               An idyllic sanctuary blending pristine natural surroundings with timeless hospitality, fine dining, and bespoke guest experiences.
             </p>
@@ -89,14 +89,14 @@ export function PublicFooter() {
           <div>
             <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-resort-sand">Contact & Concierge</h4>
             <p className="text-xs text-resort-stone">Direct line: +91 98765 43210</p>
-            <p className="text-xs text-resort-stone mt-1">Email: reservations@royalreserve.com</p>
+            <p className="text-xs text-resort-stone mt-1">Email: info@infinityresortandrestaurant.com</p>
             <div className="mt-4 pt-2 border-t border-white/10 text-xs text-resort-stone">
               Operational Hours: 24/7 Front Desk & Concierge
             </div>
           </div>
         </div>
         <div className="mt-12 border-t border-white/10 pt-6 text-center text-xs text-resort-stone">
-          &copy; {new Date().getFullYear()} The Royal Reserve Resort Management System. All rights reserved.
+          &copy; {new Date().getFullYear()} Infinity Resort and Restaurant. All rights reserved.
         </div>
       </div>
     </footer>

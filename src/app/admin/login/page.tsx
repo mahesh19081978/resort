@@ -20,7 +20,7 @@ export default function AdminLoginPage() {
             <span>Staff Management Portal</span>
           </div>
           <CardTitle className="text-3xl font-serif text-resort-charcoal tracking-tight">
-            The Royal Reserve
+            Infinity Resort
           </CardTitle>
           <CardDescription className="text-xs text-resort-stone">
             PMS, Restaurant POS & Enterprise Operations
@@ -51,7 +51,7 @@ export default function AdminLoginPage() {
                   id="email-input"
                   name="email"
                   type="email"
-                  placeholder="name@royalreserve.com"
+                  placeholder="name@infinityresortandrestaurant.com"
                   defaultValue=""
                   required
                   autoComplete="email"

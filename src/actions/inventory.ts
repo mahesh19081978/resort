@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { postStockMovement } from '@/lib/inventory/stock-ledger-service';
-import { createStockTransfer, dispatchStockTransfer, receiveStockTransfer } from '@/lib/inventory/transfer-service';
+import { createStockTransfer, approveStockTransfer, dispatchStockTransfer, receiveStockTransfer } from '@/lib/inventory/transfer-service';
 import { createStockCount, recordStockCountItems, postStockCount } from '@/lib/inventory/count-service';
 import { requirePermission } from '@/lib/permissions/rbac';
 import { getCurrentUser } from '@/lib/auth/auth';
@@ -191,6 +191,27 @@ export async function createStockTransferAction(params: {
   }
 }
 
+export async function approveStockTransferAction(params: {
+  transferId: string;
+  notes?: string | null;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:transfer:approve');
+
+    const result = await approveStockTransfer({
+      ...params,
+      approvedById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to approve transfer' };
+  }
+}
+
 export async function dispatchStockTransferAction(params: {
   transferId: string;
   notes?: string | null;
@@ -198,7 +219,7 @@ export async function dispatchStockTransferAction(params: {
   try {
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
-    requirePermission(user, 'inventory:stock:transfer');
+    requirePermission(user, 'inventory:transfer:dispatch');
 
     const result = await dispatchStockTransfer({
       ...params,
@@ -224,7 +245,7 @@ export async function receiveStockTransferAction(params: {
   try {
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
-    requirePermission(user, 'inventory:stock:transfer');
+    requirePermission(user, 'inventory:transfer:receive');
 
     const result = await receiveStockTransfer({
       ...params,

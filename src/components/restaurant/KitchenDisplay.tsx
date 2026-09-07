@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { updateKOTStatusAction } from '@/actions/restaurant';
@@ -28,6 +29,7 @@ export interface KitchenKOT {
 }
 
 export function KitchenDisplay({ kots }: { kots: KitchenKOT[] }) {
+  const router = useRouter();
   const [stationFilter, setStationFilter] = useState<string>('ALL');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -47,7 +49,7 @@ export function KitchenDisplay({ kots }: { kots: KitchenKOT[] }) {
     setUpdatingId(null);
 
     if (res.success) {
-      window.location.reload();
+      router.refresh();
     } else {
       alert(res.error || 'Failed to update KOT status');
     }

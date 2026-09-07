@@ -17,6 +17,12 @@ export interface CreateStockTransferParams {
   }>;
 }
 
+export interface ApproveStockTransferParams {
+  transferId: string;
+  approvedById?: string | null;
+  notes?: string | null;
+}
+
 export interface DispatchStockTransferParams {
   transferId: string;
   dispatchedById?: string | null;
@@ -35,7 +41,7 @@ export interface ReceiveStockTransferParams {
 }
 
 /**
- * Creates an inter-store physical transfer in DRAFT / PENDING_DISPATCH status.
+ * Creates an inter-store physical transfer in DRAFT status.
  */
 export async function createStockTransfer(
   params: CreateStockTransferParams,
@@ -63,7 +69,7 @@ export async function createStockTransfer(
         transferNumber,
         sourceStoreId,
         destStoreId,
-        status: TransferStatus.PENDING_DISPATCH,
+        status: TransferStatus.DRAFT,
         requestedById: requestedById || null,
         notes: notes || null,
       },
@@ -101,6 +107,7 @@ export async function createStockTransfer(
           transferNumber,
           sourceStoreId,
           destStoreId,
+          status: TransferStatus.DRAFT,
           itemCount: items.length,
         },
       },
@@ -115,8 +122,71 @@ export async function createStockTransfer(
 }
 
 /**
+ * Approves a transfer in DRAFT status:
+ * Validates transition: DRAFT -> APPROVED.
+ * Unauthorized/invalid transitions fail fast.
+ */
+export async function approveStockTransfer(
+  params: ApproveStockTransferParams,
+  client: Prisma.TransactionClient | typeof prisma = prisma
+) {
+  const { transferId, approvedById, notes } = params;
+
+  return await (client === prisma
+    ? prisma.$transaction(async (tx) => runApprove(tx))
+    : runApprove(client as Prisma.TransactionClient));
+
+  async function runApprove(tx: Prisma.TransactionClient) {
+    const transfer = await tx.stockTransfer.findUnique({
+      where: { id: transferId },
+    });
+
+    if (!transfer) {
+      throw new Error(`Transfer [${transferId}] not found.`);
+    }
+
+    if (transfer.status === TransferStatus.APPROVED) {
+      // Idempotent return if already approved
+      return transfer;
+    }
+
+    if (transfer.status !== TransferStatus.DRAFT) {
+      throw new Error(`Transfer cannot be approved in status [${transfer.status}]. Must be DRAFT.`);
+    }
+
+    const updated = await tx.stockTransfer.update({
+      where: { id: transfer.id },
+      data: {
+        status: TransferStatus.APPROVED,
+        approvedById: approvedById || null,
+        approvedAt: new Date(),
+        notes: notes ? `${transfer.notes || ''}\n${notes}` : transfer.notes,
+      },
+      include: { items: { include: { item: true, unit: true } } },
+    });
+
+    await recordAuditEvent(
+      {
+        userId: approvedById || null,
+        action: 'INVENTORY_TRANSFER_APPROVE',
+        entity: 'StockTransfer',
+        entityId: transfer.id,
+        newValues: {
+          transferNumber: transfer.transferNumber,
+          status: TransferStatus.APPROVED,
+          approvedAt: updated.approvedAt,
+        },
+      },
+      tx
+    );
+
+    return updated;
+  }
+}
+
+/**
  * Dispatches the transfer from the source store:
- * 1. Validates PENDING_DISPATCH status.
+ * 1. Validates APPROVED status (or PENDING_DISPATCH).
  * 2. Emits StockMovement(TRANSFER_OUT) at source store.
  * 3. Decrements source store Stock.quantityOnHand.
  * 4. Sets transfer status to IN_TRANSIT.
@@ -144,8 +214,12 @@ export async function dispatchStockTransfer(
       throw new Error(`Transfer [${transferId}] not found.`);
     }
 
-    if (transfer.status !== TransferStatus.PENDING_DISPATCH && transfer.status !== TransferStatus.DRAFT) {
-      throw new Error(`Transfer cannot be dispatched in status [${transfer.status}].`);
+    if (transfer.status === TransferStatus.IN_TRANSIT || transfer.status === TransferStatus.DISPATCHED) {
+      throw new Error(`Transfer [${transfer.transferNumber}] has already been dispatched.`);
+    }
+
+    if (transfer.status !== TransferStatus.APPROVED && transfer.status !== TransferStatus.PENDING_DISPATCH) {
+      throw new Error(`Transfer cannot be dispatched in status [${transfer.status}]. Must be APPROVED.`);
     }
 
     for (const item of transfer.items) {

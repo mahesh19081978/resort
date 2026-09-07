@@ -51,6 +51,10 @@ export type Permission =
   | 'inventory:stock:transfer'
   | 'inventory:stock:adjust'
   | 'inventory:stock:wastage'
+  | 'inventory:transfer:create'
+  | 'inventory:transfer:approve'
+  | 'inventory:transfer:dispatch'
+  | 'inventory:transfer:receive'
   | 'inventory:count:create'
   | 'inventory:count:approve'
   | 'inventory:count:post'
@@ -125,7 +129,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   STORE_MANAGER: [
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
-    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:stock:wastage', 'inventory:transfer:create', 'inventory:transfer:approve', 'inventory:transfer:dispatch',
+    'inventory:transfer:receive', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
     'inventory:opening-balance:create', 'inventory:report:view',
     'recipe:read',
     'procurement:grn:receive',

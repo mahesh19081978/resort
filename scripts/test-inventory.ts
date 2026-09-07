@@ -23,7 +23,7 @@ import { prisma } from '../src/lib/db/prisma';
 import { Prisma, StockMovementType, TransferStatus, StockCountStatus } from '@prisma/client';
 import { postStockMovement } from '../src/lib/inventory/stock-ledger-service';
 import { consumeKOTInventory } from '../src/lib/inventory/consumption-service';
-import { createStockTransfer, dispatchStockTransfer, receiveStockTransfer } from '../src/lib/inventory/transfer-service';
+import { createStockTransfer, approveStockTransfer, dispatchStockTransfer, receiveStockTransfer } from '../src/lib/inventory/transfer-service';
 import { createStockCount, recordStockCountItems, postStockCount } from '../src/lib/inventory/count-service';
 import { convertUnitQuantity } from '../src/lib/inventory/unit-service';
 
@@ -391,16 +391,44 @@ async function runTests() {
     create: { storeId: mainStore.id, itemId: itemRice.id, quantityOnHand: new Prisma.Decimal(100.0) },
   });
 
-  // 1. Create Transfer: 20 KG Rice from MAIN to KITCHEN
+  // 1. Create Transfer: 20 KG Rice from MAIN to KITCHEN (starts in DRAFT)
   const transfer = await createStockTransfer({
     sourceStoreId: mainStore.id,
     destStoreId: kitchenStore.id,
     requestedById: adminUser.id,
     items: [{ itemId: itemRice.id, requestedQty: 20.0 }],
   });
-  assert(transfer!.status === TransferStatus.PENDING_DISPATCH, 'Transfer created in PENDING_DISPATCH');
+  assert(transfer!.status === TransferStatus.DRAFT, 'Transfer created in DRAFT');
 
-  // 2. Dispatch Transfer
+  // Verify direct dispatch from DRAFT is rejected (server-side validation)
+  let directDispatchBlocked = false;
+  try {
+    await dispatchStockTransfer({
+      transferId: transfer!.id,
+      dispatchedById: adminUser.id,
+    });
+  } catch (e: any) {
+    directDispatchBlocked = true;
+  }
+  assert(directDispatchBlocked, 'Direct dispatch from DRAFT is rejected; must be APPROVED first');
+
+  // 2. Approve Transfer: Store Manager Approval (DRAFT -> APPROVED)
+  const approved = await approveStockTransfer({
+    transferId: transfer!.id,
+    approvedById: adminUser.id,
+    notes: 'Approved by Store Manager',
+  });
+  assert(approved.status === TransferStatus.APPROVED, 'Transfer status updated to APPROVED');
+  assert(approved.approvedById === adminUser.id, 'Approval user recorded for auditability');
+
+  // Verify duplicate approval is idempotent
+  const dupApprove = await approveStockTransfer({
+    transferId: transfer!.id,
+    approvedById: adminUser.id,
+  });
+  assert(dupApprove.status === TransferStatus.APPROVED, 'Duplicate approval call safely returns existing APPROVED transfer');
+
+  // 3. Dispatch Transfer: (APPROVED -> IN_TRANSIT)
   const dispatched = await dispatchStockTransfer({
     transferId: transfer!.id,
     dispatchedById: adminUser.id,
@@ -412,7 +440,19 @@ async function runTests() {
   });
   assert(mainAfterDispatch.quantityOnHand.toNumber() === 80.0, 'Source store deducted immediately upon dispatch (100 -> 80 KG)');
 
-  // 3. Receive with Discrepancy: Dispatched 20 KG. Received 18 KG accepted, 2 KG transit damaged.
+  // Verify duplicate dispatch is rejected
+  let dupDispatchBlocked = false;
+  try {
+    await dispatchStockTransfer({
+      transferId: transfer!.id,
+      dispatchedById: adminUser.id,
+    });
+  } catch (e: any) {
+    dupDispatchBlocked = true;
+  }
+  assert(dupDispatchBlocked, 'Duplicate dispatch on already dispatched transfer is rejected');
+
+  // 4. Receive with Discrepancy: Dispatched 20 KG. Received 18 KG accepted, 2 KG transit damaged.
   const received = await receiveStockTransfer({
     transferId: transfer!.id,
     receivedById: adminUser.id,
@@ -490,6 +530,211 @@ async function runTests() {
     }
   }
   assert(threwDeprecated, 'deductOrderRecipeStock throws fatal deprecation error if invoked');
+
+  // Load category for test items
+  const catGrains = await prisma.inventoryCategory.findFirstOrThrow({ where: { code: 'GRAINS' } });
+
+  // -------------------------------------------------------------------
+  // TEST 11: MOVING WAC PRESERVATION ON OUTBOUND & INBOUND RECALCULATION
+  // -------------------------------------------------------------------
+  console.log('\n--- TEST 11: Moving WAC Invariance on Outbound & Decimal Recalculation ---');
+  // Scenario:
+  // 1. Initial 100 units @ ₹100.00
+  // 2. Issue 20 units -> remaining 80 @ ₹100.00 (WAC MUST NOT CHANGE)
+  // 3. Receive 50 units @ ₹120.00
+  // 4. Expected WAC = (80 * 100 + 50 * 120) / 130 = (8000 + 6000) / 130 = 14000 / 130 = 107.6923... => ₹107.69
+  const testWacCode = 'ITEM-WAC-TEST-' + Date.now().toString().slice(-4);
+  const wacItem = await prisma.inventoryItem.create({
+    data: {
+      code: testWacCode,
+      name: 'WAC Audit Test Sugar',
+      categoryId: catGrains.id,
+      baseUnitId: uKg.id,
+      standardCost: new Prisma.Decimal(100.0),
+    },
+  });
+
+  // Step 1: 100 units @ 100.00 opening balance
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: wacItem.id,
+    movementType: StockMovementType.OPENING_BALANCE,
+    quantity: 100.0,
+    unitCost: 100.0,
+    performedById: adminUser.id,
+  });
+
+  const wacAfterOpening = await prisma.inventoryItem.findUniqueOrThrow({ where: { id: wacItem.id } });
+  assert(wacAfterOpening.standardCost.toNumber() === 100.0, 'Initial WAC is ₹100.00 for 100 units');
+
+  // Step 2: Issue 20 units -> remaining 80 units
+  const issueMov = await postStockMovement({
+    storeId: mainStore.id,
+    itemId: wacItem.id,
+    movementType: StockMovementType.STOCK_ISSUE,
+    quantity: 20.0,
+    performedById: adminUser.id,
+  });
+  assert(issueMov.balanceAfter.toNumber() === 80.0, 'Stock balance after issue is 80 units');
+  assert(issueMov.unitCost.toNumber() === 100.0, 'Outbound movement inherits current WAC ₹100.00');
+
+  const wacAfterIssue = await prisma.inventoryItem.findUniqueOrThrow({ where: { id: wacItem.id } });
+  assert(wacAfterIssue.standardCost.toNumber() === 100.0, 'Outbound stock issue strictly PRESERVES current WAC ₹100.00');
+
+  // Step 3: Receive 50 units @ ₹120.00
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: wacItem.id,
+    movementType: StockMovementType.PURCHASE_RECEIPT,
+    quantity: 50.0,
+    unitCost: 120.0,
+    performedById: adminUser.id,
+  });
+
+  // Expected WAC: (80 * 100 + 50 * 120) / (80 + 50) = 14000 / 130 = 107.69
+  const expectedDecimalWac = new Prisma.Decimal(80)
+    .times(100)
+    .plus(new Prisma.Decimal(50).times(120))
+    .dividedBy(new Prisma.Decimal(130));
+
+  const wacAfterInbound = await prisma.inventoryItem.findUniqueOrThrow({ where: { id: wacItem.id } });
+  assert(
+    wacAfterInbound.standardCost.equals(new Prisma.Decimal(expectedDecimalWac.toFixed(2))),
+    `Inbound recalculates Moving WAC accurately using Prisma.Decimal: ₹${wacAfterInbound.standardCost.toFixed(2)} === ₹${expectedDecimalWac.toFixed(2)}`
+  );
+
+  // -------------------------------------------------------------------
+  // TEST 12: TRANSFER COST & VALUATION CONSERVATION
+  // -------------------------------------------------------------------
+  console.log('\n--- TEST 12: Transfer Valuation Conservation ---');
+  // Source: 20 units @ ₹100. Transfer 10 units. Receive 10 units.
+  const testTrfItem = await prisma.inventoryItem.create({
+    data: {
+      code: 'ITEM-TRF-TEST-' + Date.now().toString().slice(-4),
+      name: 'Transfer Cost Test Item',
+      categoryId: catGrains.id,
+      baseUnitId: uKg.id,
+      standardCost: new Prisma.Decimal(100.0),
+    },
+  });
+
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: testTrfItem.id,
+    movementType: StockMovementType.OPENING_BALANCE,
+    quantity: 20.0,
+    unitCost: 100.0,
+    performedById: adminUser.id,
+  });
+
+  const trfObj = await createStockTransfer({
+    sourceStoreId: mainStore.id,
+    destStoreId: barStore.id,
+    requestedById: adminUser.id,
+    items: [{ itemId: testTrfItem.id, requestedQty: 10.0 }],
+  });
+  await approveStockTransfer({ transferId: trfObj!.id, approvedById: adminUser.id });
+  await dispatchStockTransfer({ transferId: trfObj!.id, dispatchedById: adminUser.id });
+
+  // Verify source movement valuation
+  const trfOutMov = await prisma.stockMovement.findFirstOrThrow({
+    where: { transferId: trfObj!.id, movementType: StockMovementType.TRANSFER_OUT },
+  });
+  assert(trfOutMov.unitCost.toNumber() === 100.0, 'Transfer dispatch inherits source cost basis ₹100.00');
+  assert(trfOutMov.totalCost.toNumber() === 1000.0, 'Transfer out total value is ₹1000.00');
+
+  // Receive at destination
+  await receiveStockTransfer({
+    transferId: trfObj!.id,
+    receivedById: adminUser.id,
+    items: [{ itemId: testTrfItem.id, receivedQty: 10.0 }],
+  });
+
+  const trfInMov = await prisma.stockMovement.findFirstOrThrow({
+    where: { transferId: trfObj!.id, movementType: StockMovementType.TRANSFER_IN },
+  });
+  assert(trfInMov.unitCost.toNumber() === 100.0, 'Destination receipt preserves source cost basis ₹100.00');
+  assert(trfInMov.totalCost.toNumber() === 1000.0, 'Destination stock receipt total value is ₹1000.00');
+
+  // -------------------------------------------------------------------
+  // TEST 13: STOCK COUNT SNAPSHOT BOUNDARY INTERIM SPECIFICATION
+  // -------------------------------------------------------------------
+  console.log('\n--- TEST 13: Stock Count Interim Movement Boundary (+10 In, -5 Out, Exp 105, Count 103, Var -2) ---');
+  const testCountItem = await prisma.inventoryItem.create({
+    data: {
+      code: 'ITEM-COUNT-BOUND-' + Date.now().toString().slice(-4),
+      name: 'Count Boundary Test Coffee',
+      categoryId: catGrains.id,
+      baseUnitId: uKg.id,
+      standardCost: new Prisma.Decimal(250.0),
+    },
+  });
+
+  // Step 1: Initialize main store stock with 100 units
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: testCountItem.id,
+    movementType: StockMovementType.OPENING_BALANCE,
+    quantity: 100.0,
+    unitCost: 250.0,
+    performedById: adminUser.id,
+  });
+
+  // Step 2: Freeze snapshot at 100 units
+  const boundaryCount = await createStockCount({
+    storeId: mainStore.id,
+    userId: adminUser.id,
+    notes: 'Boundary Count Test',
+  });
+  assert(boundaryCount!.items.find((i) => i.itemId === testCountItem.id)?.systemCount.toNumber() === 100.0, 'Snapshot freeze at 100 units');
+
+  // Step 3: Interim movements after snapshot: +10 Inbound, -5 Outbound
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: testCountItem.id,
+    movementType: StockMovementType.PURCHASE_RECEIPT,
+    quantity: 10.0,
+    performedById: adminUser.id,
+    remarks: 'Interim Receipt +10',
+  });
+
+  await postStockMovement({
+    storeId: mainStore.id,
+    itemId: testCountItem.id,
+    movementType: StockMovementType.STOCK_ISSUE,
+    quantity: 5.0,
+    performedById: adminUser.id,
+    remarks: 'Interim Issue -5',
+  });
+
+  // Step 4: Physical count reveals 103 units
+  // Expected = 100 + 10 - 5 = 105
+  // Physical count = 103
+  // Net variance = 103 - 105 = -2 (ADJUSTMENT_OUT: 2)
+  await recordStockCountItems({
+    stockCountId: boundaryCount!.id,
+    userId: adminUser.id,
+    items: [{ itemId: testCountItem.id, actualCount: 103.0 }],
+  });
+
+  const postBoundaryRes = await postStockCount({
+    stockCountId: boundaryCount!.id,
+    userId: adminUser.id,
+  });
+
+  assert(postBoundaryRes.adjustments.length === 1, 'Exactly 1 adjustment posted');
+  assert(postBoundaryRes.adjustments[0].variance === -2.0, 'Variance calculated exactly as -2.0 units');
+
+  const boundMov = await prisma.stockMovement.findFirstOrThrow({
+    where: { stockCountId: boundaryCount!.id, itemId: testCountItem.id },
+  });
+  assert(boundMov.movementType === StockMovementType.ADJUSTMENT_OUT, 'Physical deficit correctly generated ADJUSTMENT_OUT');
+  assert(boundMov.quantity.toNumber() === 2.0, 'Adjusted quantity is exactly 2.0 units');
+
+  const finalBoundStock = await prisma.stock.findUniqueOrThrow({
+    where: { storeId_itemId: { storeId: mainStore.id, itemId: testCountItem.id } },
+  });
+  assert(finalBoundStock.quantityOnHand.toNumber() === 103.0, 'Final stockOnHand reconciled exactly to physical count 103.0');
 
   console.log('\n================================================================');
   console.log('🎉 ALL PHASE 0.7 INVENTORY & STORES INTEGRATION TESTS PASSED!');

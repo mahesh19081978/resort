@@ -228,6 +228,7 @@ enum StockCountStatus {
 
 enum TransferStatus {
   DRAFT
+  APPROVED
   PENDING_DISPATCH
   DISPATCHED
   IN_TRANSIT
@@ -302,6 +303,7 @@ model User {
   recordedPayments Payment[]         @relation("PaymentReceiver")
   stockMovements      StockMovement[]   @relation("StockMovementCreator")
   requestedTransfers  StockTransfer[]   @relation("TransferRequester")
+  approvedTransfers   StockTransfer[]   @relation("TransferApprover")
   dispatchedTransfers StockTransfer[]   @relation("TransferDispatcher")
   receivedTransfers   StockTransfer[]   @relation("TransferReceiver")
   purchaseRequests    PurchaseRequest[] @relation("PurchaseRequester")
@@ -1244,11 +1246,14 @@ model StockTransfer {
   
   requestedById  String?
   requestedBy    User?              @relation("TransferRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedById   String?
+  approvedBy     User?              @relation("TransferApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   dispatchedById String?
   dispatchedBy   User?              @relation("TransferDispatcher", fields: [dispatchedById], references: [id], onDelete: SetNull)
   receivedById   String?
   receivedBy     User?              @relation("TransferReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
   
+  approvedAt     DateTime?
   dispatchedAt   DateTime?
   receivedAt     DateTime?
   notes          String?

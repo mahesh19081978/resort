@@ -78,24 +78,24 @@ To satisfy the revised enterprise requirements and protect financial and operati
 The conceptual chain must never be collapsed:
 ```
 Restaurant --? RestaurantTable --? TableSession (groups 1..N physical tables via TableSessionTable)
-                                          ¦
+                                          Â¦
                                           ?
                                    RestaurantOrder (DINE_IN / TAKE_AWAY / ROOM_SERVICE)
-                                          ¦
+                                          Â¦
                                           +-? RestaurantOrderItem(s)
-                                          ¦          ¦
-                                          ¦          ?
-                                          ¦      KOT(s) --? KOTItem(s) --? Kitchen Display
+                                          Â¦          Â¦
+                                          Â¦          ?
+                                          Â¦      KOT(s) --? KOTItem(s) --? Kitchen Display
                                           ?
                                    RestaurantBill(s) --? RestaurantBillItem(s) [Persisted Allocations]
-                                          ¦
+                                          Â¦
                       +---------------------------------------+
                       ?                                       ?
         Payment(s) [Direct POS]                    FolioItem [Charged to Room]
-     (CASH, UPI, CARD, etc. with                              ¦
+     (CASH, UPI, CARD, etc. with                              Â¦
        idempotency key)                                       ?
                                                         Guest Folio (Authoritative FolioItem Ledger)
-                                                              ¦
+                                                              Â¦
                                                               ?
                                                      Checkout Settlement
 ```
