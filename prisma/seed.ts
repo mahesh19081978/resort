@@ -189,6 +189,7 @@ async function main() {
     create: {
       name: 'Standard Heritage Room',
       code: 'STD',
+      slug: 'standard-heritage-room',
       description: 'Comfortable garden-facing room with handcrafted wooden accents.',
       basePrice: 5500.00,
       maxOccupancy: 2,
@@ -205,6 +206,7 @@ async function main() {
     create: {
       name: 'Deluxe Heritage Suite',
       code: 'DLX',
+      slug: 'deluxe-heritage-suite',
       description: 'Spacious upper-level suite with panoramic valley and garden vistas.',
       basePrice: 8500.00,
       maxOccupancy: 3,
@@ -221,6 +223,7 @@ async function main() {
     create: {
       name: 'Royal Forest Chalet Villa',
       code: 'VILLA',
+      slug: 'royal-forest-chalet-villa',
       description: 'Private standalone forest chalet with plunge pool and outdoor stone bath.',
       basePrice: 16000.00,
       maxOccupancy: 4,
@@ -642,6 +645,12 @@ async function main() {
     create: { name: 'Guest Room Linen & Towels', code: 'LINEN' },
   });
 
+  const catDairy = await prisma.inventoryCategory.upsert({
+    where: { code: 'DAIRY' },
+    update: {},
+    create: { name: 'Dairy & Cheese', code: 'DAIRY' },
+  });
+
   const itemRice = await prisma.inventoryItem.upsert({
     where: { code: 'RAW-RICE-KAIMA' },
     update: {},
@@ -672,7 +681,37 @@ async function main() {
     },
   });
 
-  // Recipe foundation: Biryani uses Kaima Rice & Chicken
+  const itemPaneerRaw = await prisma.inventoryItem.upsert({
+    where: { code: 'RAW-PANEER-FRESH' },
+    update: {},
+    create: {
+      categoryId: catDairy.id,
+      name: 'Fresh Malai Cottage Cheese (Paneer)',
+      code: 'RAW-PANEER-FRESH',
+      baseUnitId: uKg.id,
+      reorderLevel: 15.00,
+      reorderQuantity: 50.00,
+      currentStockTotal: 50.00,
+      standardCost: 320.00,
+    },
+  });
+
+  const itemFlour = await prisma.inventoryItem.upsert({
+    where: { code: 'RAW-MAIDA-FLOUR' },
+    update: {},
+    create: {
+      categoryId: catGrains.id,
+      name: 'Refined Wheat Flour (Maida)',
+      code: 'RAW-MAIDA-FLOUR',
+      baseUnitId: uKg.id,
+      reorderLevel: 20.00,
+      reorderQuantity: 80.00,
+      currentStockTotal: 100.00,
+      standardCost: 45.00,
+    },
+  });
+
+  // Recipe 1: Biryani uses Kaima Rice & Chicken
   const recipeBiryani = await prisma.recipe.upsert({
     where: { menuItemId: itemBiryani.id },
     update: {},
@@ -693,6 +732,40 @@ async function main() {
     where: { recipeId_inventoryItemId: { recipeId: recipeBiryani.id, inventoryItemId: itemChicken.id } },
     update: {},
     create: { recipeId: recipeBiryani.id, inventoryItemId: itemChicken.id, quantity: 0.3500, notes: '350 gm chicken per plate' },
+  });
+
+  // Recipe 2: Malai Paneer Tikka uses Paneer
+  const recipePaneer = await prisma.recipe.upsert({
+    where: { menuItemId: itemPaneer.id },
+    update: {},
+    create: {
+      menuItemId: itemPaneer.id,
+      yieldCount: 1,
+      instructions: 'Marinate 250g paneer cubes in hung curd and spices; roast in tandoor.',
+    },
+  });
+
+  await prisma.recipeIngredient.upsert({
+    where: { recipeId_inventoryItemId: { recipeId: recipePaneer.id, inventoryItemId: itemPaneerRaw.id } },
+    update: {},
+    create: { recipeId: recipePaneer.id, inventoryItemId: itemPaneerRaw.id, quantity: 0.2500, notes: '250 gm paneer per portion' },
+  });
+
+  // Recipe 3: Butter Garlic Naan uses Maida Flour
+  const recipeNaan = await prisma.recipe.upsert({
+    where: { menuItemId: itemButterNaan.id },
+    update: {},
+    create: {
+      menuItemId: itemButterNaan.id,
+      yieldCount: 1,
+      instructions: 'Roll 120g dough ball, top with garlic, slap on clay tandoor wall.',
+    },
+  });
+
+  await prisma.recipeIngredient.upsert({
+    where: { recipeId_inventoryItemId: { recipeId: recipeNaan.id, inventoryItemId: itemFlour.id } },
+    update: {},
+    create: { recipeId: recipeNaan.id, inventoryItemId: itemFlour.id, quantity: 0.1200, notes: '120 gm flour per naan' },
   });
 
   // 8. VENDORS & SERVICES

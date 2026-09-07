@@ -219,7 +219,20 @@ enum StockMovementType {
 enum StockCountStatus {
   DRAFT
   IN_PROGRESS
+  SUBMITTED
+  APPROVED
   COMPLETED
+  POSTED
+  CANCELLED
+}
+
+enum TransferStatus {
+  DRAFT
+  PENDING_DISPATCH
+  DISPATCHED
+  IN_TRANSIT
+  RECEIVED
+  REJECTED_RETURNED
   CANCELLED
 }
 
@@ -287,11 +300,14 @@ model User {
   capturedPhotos   GuestPhoto[]      @relation("PhotoCapturer")
   createdKOTs      KOT[]             @relation("KOTServer")
   recordedPayments Payment[]         @relation("PaymentReceiver")
-  stockMovements   StockMovement[]   @relation("StockMovementCreator")
-  purchaseRequests PurchaseRequest[] @relation("PurchaseRequester")
-  approvedRequests PurchaseRequest[] @relation("PurchaseApprover")
-  issuedPOs        PurchaseOrder[]   @relation("PurchaseOrderIssuer")
-  receivedGRNs     GoodsReceipt[]    @relation("GRNReceiver")
+  stockMovements      StockMovement[]   @relation("StockMovementCreator")
+  requestedTransfers  StockTransfer[]   @relation("TransferRequester")
+  dispatchedTransfers StockTransfer[]   @relation("TransferDispatcher")
+  receivedTransfers   StockTransfer[]   @relation("TransferReceiver")
+  purchaseRequests    PurchaseRequest[] @relation("PurchaseRequester")
+  approvedRequests    PurchaseRequest[] @relation("PurchaseApprover")
+  issuedPOs           PurchaseOrder[]   @relation("PurchaseOrderIssuer")
+  receivedGRNs        GoodsReceipt[]    @relation("GRNReceiver")
 
   @@index([role])
   @@index([roleEntityId])
@@ -399,6 +415,7 @@ model RoomType {
   id               String            @id @default(cuid())
   name             String
   code             String            @unique
+  slug             String            @unique
   description      String
   basePrice        Decimal           @db.Decimal(12, 2)
   maxOccupancy     Int               @default(2)
@@ -1015,17 +1032,20 @@ model KOT {
 }
 
 model KOTItem {
-  id          String              @id @default(cuid())
-  kotId       String
-  kot         KOT                 @relation(fields: [kotId], references: [id], onDelete: Cascade)
-  orderItemId String
-  orderItem   RestaurantOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  menuItemId  String
-  menuItem    MenuItem            @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
-  quantity    Int
-  notes       String?
+  id                String                 @id @default(cuid())
+  kotId             String
+  kot               KOT                    @relation(fields: [kotId], references: [id], onDelete: Cascade)
+  orderItemId       String
+  orderItem         RestaurantOrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  menuItemId        String
+  menuItem          MenuItem               @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  quantity          Int
+  servedQuantity    Int                    @default(0)
+  cancelledQuantity Int                    @default(0)
+  notes             String?
   
-  createdAt   DateTime            @default(now())
+  consumptions      InventoryConsumption[]
+  createdAt         DateTime               @default(now())
 
   @@index([kotId])
 }
@@ -1100,8 +1120,11 @@ model Store {
   isActive      Boolean         @default(true)
   
   stocks        Stock[]
+  movements     StockMovement[] @relation("StoreMovements")
   movementsFrom StockMovement[] @relation("MovementSourceStore")
   movementsTo   StockMovement[] @relation("MovementDestStore")
+  transfersFrom StockTransfer[] @relation("TransferSourceStore")
+  transfersTo   StockTransfer[] @relation("TransferDestStore")
   stockCounts   StockCount[]
   
   createdAt     DateTime        @default(now())
@@ -1109,17 +1132,19 @@ model Store {
 }
 
 model Unit {
-  id              String           @id @default(cuid())
+  id              String              @id @default(cuid())
   name            String
-  code            String           @unique
-  isActive        Boolean          @default(true)
+  code            String              @unique
+  isActive        Boolean             @default(true)
   
-  itemsAsBase     InventoryItem[]  @relation("ItemBaseUnit")
-  conversionsFrom UnitConversion[] @relation("ConversionFrom")
-  conversionsTo   UnitConversion[] @relation("ConversionTo")
+  itemsAsBase     InventoryItem[]     @relation("ItemBaseUnit")
+  conversionsFrom UnitConversion[]    @relation("ConversionFrom")
+  conversionsTo   UnitConversion[]    @relation("ConversionTo")
+  movementUnits   StockMovement[]     @relation("MovementTxUnit")
+  transferUnits   StockTransferItem[]
   
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 }
 
 model UnitConversion {
@@ -1162,6 +1187,7 @@ model InventoryItem {
   
   stocks            Stock[]
   movements         StockMovement[]
+  transferItems     StockTransferItem[]
   stockCountItems   StockCountItem[]
   poItems           PurchaseOrderItem[]
   grnItems          GoodsReceiptItem[]
@@ -1189,35 +1215,124 @@ model Stock {
   @@index([itemId])
 }
 
+model InventoryConsumption {
+  id             String          @id @default(cuid())
+  kotItemId      String
+  kotItem        KOTItem         @relation(fields: [kotItemId], references: [id], onDelete: Restrict)
+  sequenceNumber Int             @default(1)
+  portionsDelta  Int
+  idempotencyKey String          @unique
+  recipeId       String
+  recipeYield    Int
+  bomSnapshot    Json
+  
+  movements      StockMovement[]
+  createdAt      DateTime        @default(now())
+
+  @@unique([kotItemId, sequenceNumber])
+  @@index([kotItemId])
+}
+
+model StockTransfer {
+  id             String             @id @default(cuid())
+  transferNumber String             @unique
+  sourceStoreId  String
+  sourceStore    Store              @relation("TransferSourceStore", fields: [sourceStoreId], references: [id], onDelete: Restrict)
+  destStoreId    String
+  destStore      Store              @relation("TransferDestStore", fields: [destStoreId], references: [id], onDelete: Restrict)
+  status         TransferStatus     @default(DRAFT)
+  
+  requestedById  String?
+  requestedBy    User?              @relation("TransferRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  dispatchedById String?
+  dispatchedBy   User?              @relation("TransferDispatcher", fields: [dispatchedById], references: [id], onDelete: SetNull)
+  receivedById   String?
+  receivedBy     User?              @relation("TransferReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+  
+  dispatchedAt   DateTime?
+  receivedAt     DateTime?
+  notes          String?
+  
+  items          StockTransferItem[]
+  movements      StockMovement[]
+  
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([transferNumber])
+  @@index([sourceStoreId])
+  @@index([destStoreId])
+  @@index([status])
+}
+
+model StockTransferItem {
+  id            String        @id @default(cuid())
+  transferId    String
+  transfer      StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  itemId        String
+  item          InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  requestedQty  Decimal       @db.Decimal(12, 4)
+  dispatchedQty Decimal       @default(0.00) @db.Decimal(12, 4)
+  receivedQty   Decimal       @default(0.00) @db.Decimal(12, 4)
+  damagedQty    Decimal       @default(0.00) @db.Decimal(12, 4)
+  unitId        String
+  unit          Unit          @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  notes         String?
+
+  @@unique([transferId, itemId])
+}
+
 model StockMovement {
-  id             String            @id @default(cuid())
-  movementNumber String            @unique
-  itemId         String
-  item           InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  movementType   StockMovementType
-  quantity       Decimal           @db.Decimal(12, 4)
-  unitCost       Decimal           @db.Decimal(12, 2)
-  totalCost      Decimal           @db.Decimal(12, 2)
+  id                String                @id @default(cuid())
+  movementNumber    String                @unique
+  storeId           String?
+  store             Store?                @relation("StoreMovements", fields: [storeId], references: [id], onDelete: Restrict)
+  itemId            String
+  item              InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  movementType      StockMovementType
+  quantity          Decimal               @db.Decimal(12, 4)
   
-  fromStoreId    String?
-  fromStore      Store?            @relation("MovementSourceStore", fields: [fromStoreId], references: [id], onDelete: SetNull)
-  toStoreId      String?
-  toStore        Store?            @relation("MovementDestStore", fields: [toStoreId], references: [id], onDelete: SetNull)
+  transactionUnitId String?
+  transactionUnit   Unit?                 @relation("MovementTxUnit", fields: [transactionUnitId], references: [id], onDelete: SetNull)
+  enteredQuantity   Decimal?              @db.Decimal(12, 4)
+  conversionFactor  Decimal?              @db.Decimal(12, 6)
   
-  goodsReceiptId String?
-  goodsReceipt   GoodsReceipt?     @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
+  unitCost          Decimal               @db.Decimal(12, 2)
+  totalCost         Decimal               @db.Decimal(12, 2)
   
-  performedById  String?
-  performedBy    User?             @relation("StockMovementCreator", fields: [performedById], references: [id], onDelete: SetNull)
-  movementDate   DateTime          @default(now())
-  remarks        String?
+  balanceBefore     Decimal               @default(0.00) @db.Decimal(12, 4)
+  balanceAfter      Decimal               @default(0.00) @db.Decimal(12, 4)
+  
+  transferId        String?
+  transfer          StockTransfer?        @relation(fields: [transferId], references: [id], onDelete: SetNull)
+  fromStoreId       String?
+  fromStore         Store?                @relation("MovementSourceStore", fields: [fromStoreId], references: [id], onDelete: SetNull)
+  toStoreId         String?
+  toStore           Store?                @relation("MovementDestStore", fields: [toStoreId], references: [id], onDelete: SetNull)
+  
+  goodsReceiptId    String?
+  goodsReceipt      GoodsReceipt?         @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
+  
+  consumptionId     String?
+  consumption       InventoryConsumption? @relation(fields: [consumptionId], references: [id], onDelete: SetNull)
+  
+  stockCountId      String?
+  stockCount        StockCount?           @relation(fields: [stockCountId], references: [id], onDelete: SetNull)
+  
+  sourceType        String?
+  sourceId          String?
+  
+  performedById     String?
+  performedBy       User?                 @relation("StockMovementCreator", fields: [performedById], references: [id], onDelete: SetNull)
+  movementDate      DateTime              @default(now())
+  remarks           String?
+  createdAt         DateTime              @default(now())
 
   @@index([movementNumber])
-  @@index([itemId])
+  @@index([storeId, itemId])
   @@index([movementType])
-  @@index([fromStoreId])
-  @@index([toStoreId])
   @@index([movementDate])
+  @@index([sourceType, sourceId])
 }
 
 model StockCount {
@@ -1227,6 +1342,7 @@ model StockCount {
   store       Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
   status      StockCountStatus @default(DRAFT)
   items       StockCountItem[]
+  movements   StockMovement[]
   notes       String?
   conductedAt DateTime         @default(now())
   createdAt   DateTime         @default(now())

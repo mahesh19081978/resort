@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db/prisma';
 import { requirePermission } from '@/lib/auth/auth';
 import { recordAuditEvent } from '@/lib/auth/audit';
+import { generateUniqueRoomTypeSlug } from '@/lib/slug';
 import {
   propertyUpdateSchema,
   buildingSchema,
@@ -296,6 +297,7 @@ export async function createRoomTypeAction(
         data: {
           name: parsed.data.name,
           code: parsed.data.code,
+          slug: await generateUniqueRoomTypeSlug(parsed.data.name),
           description: parsed.data.description,
           basePrice: parsed.data.basePrice,
           maxOccupancy: parsed.data.maxOccupancy,
