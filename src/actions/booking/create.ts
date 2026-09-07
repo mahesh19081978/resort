@@ -40,7 +40,30 @@ export async function createPublicBookingAction(
 
     const input: CreateBookingRequestInput = parsed.data;
 
-    // 3. Create Reservation Hold under Pessimistic DB Lock
+    // 3. Turnstile Bot Verification (Fail-closed in production if secret is configured)
+    const turnstileSecret = process.env.TURNSTILE_SECRET_KEY;
+    if (process.env.NODE_ENV === 'production' && turnstileSecret && !turnstileSecret.startsWith('0x4AAAAAA')) {
+      if (!input.turnstileToken) {
+        return fail('Bot protection verification token required.', 'BUSINESS_RULE_VIOLATION');
+      }
+
+      try {
+        const verifyRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `secret=${encodeURIComponent(turnstileSecret)}&response=${encodeURIComponent(input.turnstileToken)}&remoteip=${encodeURIComponent(clientIp)}`,
+        });
+        const outcome = (await verifyRes.json()) as { success: boolean };
+        if (!outcome.success) {
+          return fail('Bot protection verification failed. Please refresh and try again.', 'BUSINESS_RULE_VIOLATION');
+        }
+      } catch (err) {
+        console.error('[TURNSTILE_VERIFY_ERROR]', err);
+        return fail('Bot verification service unavailable.', 'EXTERNAL_SERVICE_ERROR');
+      }
+    }
+
+    // 4. Create Reservation Hold under Pessimistic DB Lock
     const booking = await createReservationHold(input);
 
     // 4. Initiate Payment Intent via Gateway SPI

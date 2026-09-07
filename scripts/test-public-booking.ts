@@ -814,9 +814,22 @@ async function runTests() {
     const second = await processPaymentWebhook(payload);
     assert.strictEqual(second.status, 'IDEMPOTENT_REPLAY');
 
-    console.log('  ✓ PASS: Repeated webhook on CONFIRMED reservation safely returned idempotent result\n');
+    // Test a second DIFFERENT provider transaction ID arriving for the already confirmed reservation
+    const differentTxId = `tx-different-${Date.now()}`;
+    const differentPayload = {
+      ...payload,
+      providerTransactionId: differentTxId,
+      idempotencyKey: `idem-diff-${Date.now()}`,
+    };
+    const third = await processPaymentWebhook(differentPayload);
+    assert.strictEqual(third.status, 'CONFIRMED_RES_REFUND', 'Second different transaction on CONFIRMED reservation must trigger refund workflow');
+    assert.strictEqual(third.reservation!.status, ReservationStatus.CONFIRMED, 'Reservation must remain CONFIRMED');
+    assert.strictEqual(third.refund!.status, RefundStatus.PENDING, 'Duplicate captured payment must have PENDING refund');
+
+    console.log('  ✓ PASS: Repeated webhook on CONFIRMED reservation safely returned idempotent result & second tx auto-refunded\n');
     passedCount++;
 
+    await prisma.refund.deleteMany({ where: { paymentId: third.payment.id } });
     await prisma.payment.deleteMany({ where: { reservationId: booking.reservationId } });
     await prisma.reservationRoom.deleteMany({ where: { reservationId: booking.reservationId } });
     await prisma.reservation.delete({ where: { id: booking.reservationId } });

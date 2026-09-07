@@ -429,7 +429,10 @@ async function executeWebhookProcessing(
   // 3. Database-side time check
   const dbTime = await tx.$queryRaw<Array<{ dbNow: Date }>>`SELECT NOW() AS "dbNow"`;
   const dbNow = dbTime[0].dbNow;
-  const isHoldExpired = reservation.expiresAt ? reservation.expiresAt.getTime() <= dbNow.getTime() : true;
+  const isHoldExpired =
+    reservation.status === ReservationStatus.PENDING &&
+    reservation.expiresAt !== null &&
+    reservation.expiresAt.getTime() <= dbNow.getTime();
 
   const capturedAmount = new Prisma.Decimal(payload.amount);
   const isGatewaySuccess = payload.eventType === 'payment.success';
@@ -649,7 +652,56 @@ async function executeWebhookProcessing(
     return { status: 'CANCELLED_RES_REFUND', payment, refund, reservation };
   }
 
-  // ── SCENARIO E: GATEWAY FAILED ──
+  // ── SCENARIO E: GATEWAY SUCCESS ON ALREADY CONFIRMED RESERVATION (Different Transaction) ──
+  if (isGatewaySuccess && reservation.status === ReservationStatus.CONFIRMED) {
+    const paymentNumber = generateBookingNumber('RES').replace('RES', 'PAY');
+    const payment = await tx.payment.create({
+      data: {
+        paymentNumber,
+        context: PaymentContext.RESERVATION_ADVANCE,
+        amount: capturedAmount,
+        currency: 'INR',
+        method: 'ONLINE',
+        status: PaymentStatus.SUCCESS,
+        provider: payload.provider,
+        providerTransactionId: payload.providerTransactionId,
+        idempotencyKey: payload.idempotencyKey,
+        reservationId: reservation.id,
+        notes: 'DUPLICATE_PAYMENT_ON_CONFIRMED_RESERVATION',
+      },
+    });
+
+    const refundNumber = generateBookingNumber('REF');
+    const refund = await tx.refund.create({
+      data: {
+        refundNumber,
+        paymentId: payment.id,
+        amount: capturedAmount,
+        reason: 'Payment arrived for an already confirmed reservation. Duplicate charge reversal pending.',
+        reasonCode: 'DUPLICATE_CONFIRMED_RES_REVERSAL',
+        status: RefundStatus.PENDING,
+        idempotencyKey: generateRefundIdempotencyKey('CANCELLED_RES', payload.provider, payload.providerTransactionId),
+      },
+    });
+
+    await recordAuditEvent(
+      {
+        action: 'PAYMENT_ON_CONFIRMED_RESERVATION_REFUND',
+        entity: 'Reservation',
+        entityId: reservation.id,
+        newValues: {
+          reservationNumber: reservation.reservationNumber,
+          paymentId: payment.id,
+          refundNumber: refund.refundNumber,
+        },
+      },
+      tx
+    );
+
+    return { status: 'CONFIRMED_RES_REFUND', payment, refund, reservation };
+  }
+
+  // ── SCENARIO F: GATEWAY FAILED ──
   const paymentNumber = generateBookingNumber('RES').replace('RES', 'PAY');
   const payment = await tx.payment.create({
     data: {
