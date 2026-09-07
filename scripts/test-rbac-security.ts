@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert';
+import assert from 'node:assert';
 import bcrypt from 'bcryptjs';
 import { UserRole, Permission, ROLE_PERMISSIONS, hasPermission } from '../src/lib/permissions/rbac';
 import { DUMMY_BCRYPT_HASH, verifyPassword } from '../src/lib/auth/password';
@@ -90,7 +90,7 @@ async function runRbacTests() {
   assert.strictEqual(hasPermission({ role: 'KITCHEN_STAFF' }, 'vendor:manage'), false);
 
   assert.strictEqual(hasPermission({ role: 'RESTAURANT_BILLER' }, 'kitchen:update_kot'), false);
-  assert.strictEqual(hasPermission({ role: 'RESTAURANT_BILLER' }, 'restaurant:table:manage'), false);
+  assert.strictEqual(hasPermission({ role: 'RESTAURANT_BILLER' }, 'restaurant:order:cancel'), false);
   assert.strictEqual(hasPermission({ role: 'RESTAURANT_BILLER' }, 'inventory:issue'), false);
 
   assert.strictEqual(hasPermission({ role: 'STORE_MANAGER' }, 'procurement:order:create'), false);

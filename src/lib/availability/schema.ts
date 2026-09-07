@@ -24,7 +24,10 @@ export const availabilitySearchSchema = z
       .number()
       .int()
       .min(1, 'At least 1 guest is required')
-      .max(20, 'Maximum 20 guests allowed'),
+      .max(20, 'Maximum 20 guests allowed')
+      .default(1),
+    adults: z.coerce.number().int().min(1).max(20).optional(),
+    children: z.coerce.number().int().min(0).max(10).optional(),
   })
   .refine(
     (data) => {

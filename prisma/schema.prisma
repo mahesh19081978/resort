@@ -638,6 +638,9 @@ model Reservation {
   taxAmount          Decimal            @default(0.00) @db.Decimal(12, 2)
   totalAmount        Decimal            @db.Decimal(12, 2)
   advancePaidAmount  Decimal            @default(0.00) @db.Decimal(12, 2)
+  bookingRequestId   String?            @unique
+  expiresAt          DateTime?
+  cancellationReason String?
   
   reservedRooms      ReservationRoom[]
   accompanyingGuests ReservationGuest[]
@@ -651,6 +654,8 @@ model Reservation {
   @@index([status])
   @@index([checkInDate, checkOutDate])
   @@index([primaryGuestId])
+  @@index([status, expiresAt])
+  @@index([checkInDate, checkOutDate, status])
 }
 
 model ReservationRoom {
@@ -671,6 +676,7 @@ model ReservationRoom {
   @@index([reservationId])
   @@index([roomTypeId])
   @@index([ratePlanId])
+  @@index([roomTypeId, reservationId])
 }
 
 model ReservationGuest {
@@ -838,6 +844,7 @@ model Payment {
   @@index([folioId])
   @@index([reservationId])
   @@index([restaurantBillId])
+  @@unique([provider, providerTransactionId])
 }
 
 model Refund {
@@ -847,12 +854,15 @@ model Refund {
   payment          Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   amount           Decimal      @db.Decimal(12, 2)
   reason           String
+  reasonCode       String?
   status           RefundStatus @default(PENDING)
   providerRefundId String?
+  idempotencyKey   String?      @unique
   processedAt      DateTime?
   createdAt        DateTime     @default(now())
 
   @@index([paymentId])
+  @@index([status])
 }
 // ==========================================
 // 10. RESTAURANT, TABLES, POS & KOT

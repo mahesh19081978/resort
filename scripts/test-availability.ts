@@ -150,6 +150,8 @@ async function runTests() {
     where: { roomTypeId: poolViewRoom.id, isActive: true },
   });
 
+  const initialActiveRoomCount = await prisma.room.count({ where: { isActive: true } });
+
   // Use dates far in the future to avoid interference with real data
   const today = new Date();
   const futureDate = new Date(today);
@@ -875,8 +877,7 @@ async function runTests() {
 
     const roomCount = await prisma.room.count({ where: { isActive: true } });
     assert(
-      roomCount ===
-        standardRoomCount + deluxeRoomCount + villaRoomCount + poolViewRoomCount,
+      roomCount === initialActiveRoomCount,
       'G8c: Room count unchanged after all tests'
     );
   }

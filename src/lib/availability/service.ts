@@ -79,13 +79,14 @@ export interface AvailabilityResult {
  * - Stays: ACTIVE
  */
 export async function getAvailableRoomTypes(
-  params: AvailabilitySearchParams
+  params: AvailabilitySearchParams,
+  client: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<AvailabilityResult> {
   const requestedCheckIn = new Date(`${params.checkIn}T00:00:00Z`);
   const requestedCheckOut = new Date(`${params.checkOut}T00:00:00Z`);
 
   // 1. Fetch all active RoomTypes with their amenities, media, and rooms
-  const roomTypes = (await prisma.roomType.findMany({
+  const roomTypes = (await client.roomType.findMany({
     where: { isActive: true },
     include: {
       amenities: { include: { amenity: true } },
@@ -102,29 +103,7 @@ export async function getAvailableRoomTypes(
   const roomTypeIds = roomTypes.map((rt) => rt.id);
 
   // ── STEP A: Active stays — the authoritative physical-room blocker ──
-  //
-  // Occupancy window: [actualCheckIn, effectiveEnd)
-  //   where effectiveEnd = COALESCE(actualCheckOut, GREATEST(expectedCheckOut, CURRENT_DATE))
-  //
-  // Overstay policy:
-  //   An ACTIVE stay whose expectedCheckOut has passed but actualCheckOut is
-  //   still null represents a guest who has NOT checked out. The physical room
-  //   is still occupied. We must NOT release it solely because the planned
-  //   checkout date has passed. GREATEST(expectedCheckOut, CURRENT_DATE)
-  //   ensures the room remains blocked through at least today.
-  //
-  // A stay blocks its assigned physical room if:
-  //   actualCheckIn < requestedCheckOut  (guest arrived before requested end)
-  //   AND effectiveEnd > requestedCheckIn  (guest hasn't left before requested start)
-  //
-  // This correctly handles:
-  //   - Normal checkout:   room blocked until actualCheckOut
-  //   - Early checkout:    room blocked until actualCheckOut (not expectedCheckOut)
-  //   - No checkout yet:   room blocked until expectedCheckOut (or today if overstay)
-  //   - Overstay:          room blocked until actualCheckOut (which is after expected)
-  //   - Closed/completed:  room NOT blocked (actualCheckOut is set)
-
-  const blockedStays = await prisma.$queryRaw<{ roomId: string }[]>`
+  const blockedStays = await client.$queryRaw<{ roomId: string }[]>`
     SELECT ra."roomId"
     FROM "RoomAssignment" ra
     JOIN "Stay" s ON s.id = ra."stayId"
@@ -139,7 +118,7 @@ export async function getAvailableRoomTypes(
   const stayBlockedByType = new Map<string, Set<string>>();
 
   if (stayBlockedRoomIds.size > 0) {
-    const stayBlockedRooms = await prisma.room.findMany({
+    const stayBlockedRooms = await client.room.findMany({
       where: { id: { in: Array.from(stayBlockedRoomIds) } },
       select: { id: true, roomTypeId: true },
     });
@@ -152,42 +131,37 @@ export async function getAvailableRoomTypes(
   }
 
   // ── STEP B: Reservations — RoomType-level inventory blocker ──
-  //
-  // ReservationRoom is a RoomType-level allocation: it stores (roomTypeId,
-  // roomsCount) with NO physical Room ID. It represents pre-check-in
-  // inventory reserved at the type level.
-  //
-  // A checked-in reservation has BOTH a ReservationRoom AND an active
-  // RoomAssignment → Stay. The Stay's physical room is already counted in
-  // stayBlockedCount. We must NOT subtract the same physical room twice.
-  //
-  // Net reservation blocking per RoomType =
-  //   sum(ReservationRoom.roomsCount) - rooms already blocked by active stays
-  //
-  // Invariant: this subtraction is safe because ReservationRoom has no
-  // physical Room ID — it is intentionally a type-level allocation.
-  // When Stay.reservationId links a Stay to a Reservation, the Stay's
-  // RoomAssignment already accounts for that physical room.
+  // Uses PostgreSQL NOW() directly so hold expiration decisions are database-authoritative.
+  // Legacy PENDING records with NULL expiresAt do NOT block website availability.
+  const reservationBlocks = await client.$queryRaw<Array<{ roomTypeId: string; blockedCount: number }>>`
+    SELECT rr."roomTypeId", COALESCE(SUM(rr."roomsCount"), 0)::int AS "blockedCount"
+    FROM "ReservationRoom" rr
+    JOIN "Reservation" r ON r.id = rr."reservationId"
+    WHERE rr."roomTypeId" = ANY(${roomTypeIds}::text[])
+      AND r."checkInDate" < ${requestedCheckOut}::date
+      AND r."checkOutDate" > ${requestedCheckIn}::date
+      AND (
+        r.status = 'CONFIRMED'
+        OR (r.status = 'PENDING' AND r."expiresAt" IS NOT NULL AND r."expiresAt" > NOW())
+      )
+    GROUP BY rr."roomTypeId"
+  `;
 
-  const blockedByReservation = await prisma.reservationRoom.groupBy({
-    by: ['roomTypeId'],
-    where: {
-      roomTypeId: { in: roomTypeIds },
-      reservation: {
-        status: { in: ['PENDING', 'CONFIRMED'] },
-        checkInDate: { lt: requestedCheckOut },
-        checkOutDate: { gt: requestedCheckIn },
-      },
-    },
-    _sum: { roomsCount: true },
-  });
+  const reservationBlockedMap = new Map<string, number>();
+  for (const rb of reservationBlocks) {
+    reservationBlockedMap.set(rb.roomTypeId, Number(rb.blockedCount));
+  }
 
   // ── STEP C: Calculate availability per RoomType ──
-
   const availableRoomTypes: AvailableRoomType[] = [];
 
   for (const rt of roomTypes) {
-    if (rt.maxOccupancy < params.guests) continue;
+    const totalOccupancy = params.adults && params.children !== undefined 
+      ? params.adults + params.children 
+      : params.guests;
+    if (rt.maxOccupancy < totalOccupancy) continue;
+    if (params.adults && rt.maxAdults < params.adults) continue;
+    if (params.children && rt.maxChildren < params.children) continue;
 
     const totalActiveRooms = rt.rooms.length;
     if (totalActiveRooms === 0) continue;
@@ -195,13 +169,10 @@ export async function getAvailableRoomTypes(
     // Physical rooms blocked by active stays
     const stayBlockedCount = stayBlockedByType.get(rt.id)?.size ?? 0;
 
-    // Reservation blocking (raw sum of reserved rooms)
-    const reservationBlockedRaw =
-      blockedByReservation.find((br) => br.roomTypeId === rt.id)?._sum.roomsCount ?? 0;
-    const reservationBlocked = Number(reservationBlockedRaw);
+    // Reservation blocking
+    const reservationBlocked = reservationBlockedMap.get(rt.id) ?? 0;
 
     // Net reservation blocking = raw - rooms already covered by active stays
-    // (prevents double-counting the same physical room)
     const netReservationBlocked = Math.max(0, reservationBlocked - stayBlockedCount);
 
     const totalBlocked = stayBlockedCount + netReservationBlocked;
