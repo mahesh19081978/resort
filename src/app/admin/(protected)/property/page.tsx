@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button';
 import { Building, Layers, MapPin, Phone, Mail, Save, Plus } from 'lucide-react';
 import { updatePropertyAction, createBuildingAction } from '@/actions/pms';
+import { SubmitButton } from '@/components/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -234,9 +235,9 @@ export default async function PropertyPage() {
                 />
               </div>
 
-              <Button type="submit" variant="primary" size="sm" className="w-full gap-1.5 text-xs">
+              <SubmitButton type="submit" variant="primary" size="sm" className="w-full gap-1.5 text-xs" pendingLabel="Saving...">
                 <Save className="h-3.5 w-3.5" /> Save Property Details
-              </Button>
+              </SubmitButton>
             </form>
           </CardContent>
         </Card>
@@ -330,9 +331,9 @@ export default async function PropertyPage() {
                     placeholder="Code (e.g. SUNSET-CHALET)"
                     className="w-36 rounded border border-resort-sand bg-white px-3 py-1.5 text-xs text-resort-charcoal font-mono uppercase"
                   />
-                  <Button type="submit" variant="secondary" size="sm" className="gap-1 text-xs">
+                  <SubmitButton type="submit" variant="secondary" size="sm" className="gap-1 text-xs" pendingLabel="Adding...">
                     <Plus className="h-3.5 w-3.5" /> Add Building
-                  </Button>
+                  </SubmitButton>
                 </form>
               </div>
             </CardContent>

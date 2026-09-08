@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X, ChevronRight, Phone } from 'lucide-react';
@@ -17,15 +18,26 @@ const NAV_LINKS = [
   { href: '/contact', label: 'Contact' },
 ];
 
-export function Header() {
+interface HeaderProps {
+  variant?: 'transparent' | 'solid';
+}
+
+const SOLID_ROUTES = ['/booking/payment', '/booking/confirmation'];
+
+export function Header({ variant = 'transparent' }: HeaderProps) {
+  const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const forceSolid = variant === 'solid' || SOLID_ROUTES.some((r) => pathname.startsWith(r));
+  const isSolid = forceSolid || scrolled;
+
   useEffect(() => {
+    if (forceSolid) return;
     const onScroll = () => setScrolled(window.scrollY > 60);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+  }, [forceSolid]);
 
   useEffect(() => {
     if (mobileOpen) {
@@ -41,17 +53,17 @@ export function Header() {
       <header
         className={cn(
           'fixed top-0 left-0 right-0 z-50 transition-all duration-500',
-          scrolled
+          isSolid
             ? 'bg-resort-ivory/95 backdrop-blur-md shadow-luxury border-b border-resort-sand/50'
             : 'bg-transparent'
         )}
       >
         <div className="container-resort flex items-center justify-between h-20 md:h-24">
           <div className="lg:hidden">
-            <BrandLogo variant={scrolled ? 'dark' : 'light'} size="compact" linked={false} />
+            <BrandLogo variant={isSolid ? 'dark' : 'light'} size="compact" linked={false} />
           </div>
           <div className="hidden lg:block">
-            <BrandLogo variant={scrolled ? 'dark' : 'light'} />
+            <BrandLogo variant={isSolid ? 'dark' : 'light'} />
           </div>
 
           <nav className="hidden lg:flex items-center gap-1">
@@ -61,7 +73,7 @@ export function Header() {
                 href={link.href}
                 className={cn(
                   'px-4 py-2 text-sm font-medium transition-colors duration-300 rounded-full',
-                  scrolled
+                  isSolid
                     ? 'text-resort-charcoal-text hover:text-resort-gold-dark hover:bg-resort-gold/10'
                     : 'text-white/90 hover:text-white hover:bg-white/10'
                 )}
@@ -76,7 +88,7 @@ export function Header() {
               href={`tel:${RESORT.phoneRaw}`}
               className={cn(
                 'hidden md:inline-flex items-center gap-2 text-sm font-medium transition-colors',
-                scrolled ? 'text-resort-charcoal-text hover:text-resort-forest' : 'text-white/80 hover:text-white'
+                isSolid ? 'text-resort-charcoal-text hover:text-resort-forest' : 'text-white/80 hover:text-white'
               )}
             >
               <Phone className="h-4 w-4" />
@@ -86,7 +98,7 @@ export function Header() {
               href="/booking"
               className={cn(
                 'hidden md:inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold rounded-full transition-all duration-300',
-                scrolled
+                isSolid
                   ? 'bg-resort-forest text-white hover:bg-resort-forest-light'
                   : 'bg-white/15 text-white border border-white/30 hover:bg-white/25 backdrop-blur-sm'
               )}
@@ -98,7 +110,7 @@ export function Header() {
               onClick={() => setMobileOpen(true)}
               className={cn(
                 'lg:hidden p-2 rounded-full transition-colors',
-                scrolled
+                isSolid
                   ? 'text-resort-charcoal-text hover:bg-resort-sand'
                   : 'text-white hover:bg-white/10'
               )}

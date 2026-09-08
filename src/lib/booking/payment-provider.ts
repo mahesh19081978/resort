@@ -47,6 +47,12 @@ export class MockPaymentGatewayProvider implements PaymentGatewayProvider {
   name = 'MOCK_GATEWAY';
 
   async createPaymentIntent(params: PaymentIntentParams): Promise<PaymentIntentResult> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[CRITICAL SECURITY GUARD] Mock payment provider is strictly disallowed in production environment. A real payment gateway provider (e.g. Razorpay/HDFC) must be configured.'
+      );
+    }
+
     const txRef = `MOCK-TX-${params.reservationNumber}-${Date.now()}`;
     return {
       transactionReference: txRef,
@@ -57,7 +63,24 @@ export class MockPaymentGatewayProvider implements PaymentGatewayProvider {
 
   async verifyWebhook(payload: unknown, signature: string): Promise<WebhookVerificationResult> {
     const data = payload as any;
-    // In mock mode, verify signature format
+
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        isValid: false,
+        eventId: data?.eventId || 'unknown',
+        eventType: 'payment.failed',
+        provider: this.name,
+        providerTransactionId: data?.providerTransactionId || '',
+        idempotencyKey: data?.idempotencyKey || '',
+        reservationId: data?.reservationId || '',
+        amount: new Prisma.Decimal(data?.amount || 0),
+        currency: 'INR',
+        method: PaymentMethod.ONLINE,
+        errorMessage: 'Mock gateway is strictly prohibited in production environment.',
+      };
+    }
+
+    // In mock mode (dev/test), verify signature format
     if (!signature || signature.length < 5) {
       return {
         isValid: false,

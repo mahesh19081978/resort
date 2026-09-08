@@ -10,11 +10,12 @@ import {
   guestDocumentUploadSchema,
   guestPhotoUploadSchema,
   folioChargeSchema,
+  guestDocumentVerifySchema,
 } from '@/validations/frontdesk';
 import { executeCheckIn, CheckInResult } from '@/lib/frontdesk/checkin';
 import { executeCheckOut, CheckOutResult } from '@/lib/frontdesk/checkout';
 import { getEligibleRoomsForCheckIn } from '@/lib/frontdesk/eligibility';
-import { FolioItemType } from '@prisma/client';
+import { FolioItemType, Prisma } from '@prisma/client';
 import crypto from 'crypto';
 
 export interface ActionResponse<T = unknown> {
@@ -61,10 +62,13 @@ export async function checkInAction(
       idDocumentType: formData.get('idDocumentType')?.toString() || '',
       idDocumentNumber: formData.get('idDocumentNumber')?.toString() || '',
       documentStorageRef: formData.get('documentStorageRef')?.toString() || undefined,
+      documentDataBase64: formData.get('documentDataBase64')?.toString() || undefined,
       documentFileName: formData.get('documentFileName')?.toString() || undefined,
       documentMimeType: formData.get('documentMimeType')?.toString() || undefined,
       documentFileSize: formData.get('documentFileSize') ? Number(formData.get('documentFileSize')) : undefined,
       photoStorageRef: formData.get('photoStorageRef')?.toString() || undefined,
+      photoDataBase64: formData.get('photoDataBase64')?.toString() || undefined,
+      photoMimeType: formData.get('photoMimeType')?.toString() || undefined,
       notes: formData.get('notes')?.toString() || undefined,
       advanceDepositAmount: formData.get('advanceDepositAmount')
         ? Number(formData.get('advanceDepositAmount'))
@@ -73,16 +77,39 @@ export async function checkInAction(
       advanceDepositReference: formData.get('advanceDepositReference')?.toString() || undefined,
     };
 
-    const parsed = checkInSchema.safeParse(raw);
+    const parsed = checkInSchema.safeParse({
+      reservationId: raw.reservationId,
+      roomId: raw.roomId,
+      expectedCheckOut: raw.expectedCheckOut,
+      idDocumentType: raw.idDocumentType,
+      idDocumentNumber: raw.idDocumentNumber,
+      documentStorageRef: raw.documentStorageRef,
+      documentFileName: raw.documentFileName,
+      documentMimeType: raw.documentMimeType,
+      documentFileSize: raw.documentFileSize,
+      photoStorageRef: raw.photoStorageRef,
+      notes: raw.notes,
+      advanceDepositAmount: raw.advanceDepositAmount,
+      advanceDepositMethod: raw.advanceDepositMethod,
+      advanceDepositReference: raw.advanceDepositReference,
+    });
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0].message };
     }
 
-    const result = await executeCheckIn(parsed.data, {
-      id: user.id,
-      name: user.name,
-      role: user.role,
-    });
+    const result = await executeCheckIn(
+      {
+        ...parsed.data,
+        documentDataBase64: raw.documentDataBase64,
+        photoDataBase64: raw.photoDataBase64,
+        photoMimeType: raw.photoMimeType,
+      },
+      {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+      }
+    );
 
     revalidatePath('/admin/frontdesk');
     revalidatePath('/admin/frontdesk/arrivals');
@@ -149,9 +176,9 @@ export async function checkOutAction(
 // Permission: 'guest:manage'
 // ----------------------------------------------------
 export async function uploadGuestDocumentAction(
-  prevState: ActionResponse<{ documentId: string; storageRef: string }> | null,
+  prevState: ActionResponse<{ documentId: string; storageRef: string; isReplacement: boolean }> | null,
   formData: FormData
-): Promise<ActionResponse<{ documentId: string; storageRef: string }>> {
+): Promise<ActionResponse<{ documentId: string; storageRef: string; isReplacement: boolean }>> {
   try {
     const user = await requirePermission('guest:manage');
 
@@ -162,6 +189,7 @@ export async function uploadGuestDocumentAction(
       fileBase64: formData.get('fileBase64')?.toString() || '',
       fileName: formData.get('fileName')?.toString() || '',
       mimeType: formData.get('mimeType')?.toString() || '',
+      existingDocumentId: formData.get('existingDocumentId')?.toString() || undefined,
     };
 
     const parsed = guestDocumentUploadSchema.safeParse(raw);
@@ -178,37 +206,108 @@ export async function uploadGuestDocumentAction(
     const storageHash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 16);
     const storageRef = 'vault://docs/' + parsed.data.guestId + '/' + Date.now() + '-' + storageHash;
 
-    const doc = await prisma.guestDocument.create({
-      data: {
-        guestId: parsed.data.guestId,
-        documentType: parsed.data.documentType,
-        documentNumber: parsed.data.documentNumber,
-        fileUrl: storageRef,
-        fileName: parsed.data.fileName,
-        mimeType: parsed.data.mimeType,
-        fileSize: buffer.length,
-        verificationStatus: 'VERIFIED',
-        verifiedById: user.id,
-        verifiedAt: new Date(),
-        uploadedById: user.id,
-      },
-    });
+    let isReplacement = false;
+    let docId: string;
 
-    await recordAuditEvent({
-      userId: user.id,
-      action: 'GUEST_DOCUMENT_UPLOADED',
-      entity: 'GuestDocument',
-      entityId: doc.id,
-      newValues: {
-        guestId: parsed.data.guestId,
-        documentType: parsed.data.documentType,
-        fileSize: buffer.length,
-      },
-    });
+    if (parsed.data.existingDocumentId) {
+      const existing = await prisma.guestDocument.findUnique({
+        where: { id: parsed.data.existingDocumentId },
+      });
+
+      if (existing && existing.guestId === parsed.data.guestId) {
+        isReplacement = true;
+        const updated = await prisma.guestDocument.update({
+          where: { id: parsed.data.existingDocumentId },
+          data: {
+            documentType: parsed.data.documentType,
+            documentNumber: parsed.data.documentNumber,
+            fileUrl: storageRef,
+            fileDataBase64: parsed.data.fileBase64,
+            fileName: parsed.data.fileName,
+            mimeType: parsed.data.mimeType,
+            fileSize: buffer.length,
+            verificationStatus: 'PENDING',
+            verifiedById: null,
+            verifiedAt: null,
+            uploadedById: user.id,
+          },
+        });
+        docId = updated.id;
+
+        await recordAuditEvent({
+          userId: user.id,
+          action: 'GUEST_DOCUMENT_REPLACED',
+          entity: 'GuestDocument',
+          entityId: docId,
+          newValues: {
+            guestId: parsed.data.guestId,
+            documentType: parsed.data.documentType,
+            fileSize: buffer.length,
+            previousFileUrl: existing.fileUrl,
+          },
+        });
+      } else {
+        const created = await prisma.guestDocument.create({
+          data: {
+            guestId: parsed.data.guestId,
+            documentType: parsed.data.documentType,
+            documentNumber: parsed.data.documentNumber,
+            fileUrl: storageRef,
+            fileDataBase64: parsed.data.fileBase64,
+            fileName: parsed.data.fileName,
+            mimeType: parsed.data.mimeType,
+            fileSize: buffer.length,
+            verificationStatus: 'PENDING',
+            uploadedById: user.id,
+          },
+        });
+        docId = created.id;
+
+        await recordAuditEvent({
+          userId: user.id,
+          action: 'GUEST_DOCUMENT_UPLOADED',
+          entity: 'GuestDocument',
+          entityId: docId,
+          newValues: {
+            guestId: parsed.data.guestId,
+            documentType: parsed.data.documentType,
+            fileSize: buffer.length,
+          },
+        });
+      }
+    } else {
+      const created = await prisma.guestDocument.create({
+        data: {
+          guestId: parsed.data.guestId,
+          documentType: parsed.data.documentType,
+          documentNumber: parsed.data.documentNumber,
+          fileUrl: storageRef,
+          fileDataBase64: parsed.data.fileBase64,
+          fileName: parsed.data.fileName,
+          mimeType: parsed.data.mimeType,
+          fileSize: buffer.length,
+          verificationStatus: 'PENDING',
+          uploadedById: user.id,
+        },
+      });
+      docId = created.id;
+
+      await recordAuditEvent({
+        userId: user.id,
+        action: 'GUEST_DOCUMENT_UPLOADED',
+        entity: 'GuestDocument',
+        entityId: docId,
+        newValues: {
+          guestId: parsed.data.guestId,
+          documentType: parsed.data.documentType,
+          fileSize: buffer.length,
+        },
+      });
+    }
 
     return {
       success: true,
-      data: { documentId: doc.id, storageRef },
+      data: { documentId: docId, storageRef, isReplacement },
     };
   } catch (error) {
     return {
@@ -253,6 +352,8 @@ export async function captureGuestPhotoAction(
       data: {
         guestId: parsed.data.guestId,
         fileUrl: storageRef,
+        fileDataBase64: parsed.data.photoBase64,
+        mimeType: parsed.data.mimeType,
         capturedById: user.id,
       },
     });
@@ -276,6 +377,255 @@ export async function captureGuestPhotoAction(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to capture photo',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 5b. GET RESERVATION PAYMENT SUMMARY
+// Permission: 'checkin:perform'
+// ----------------------------------------------------
+export interface ReservationPaymentSummary {
+  reservationId: string;
+  reservationNumber: string;
+  roomRentTotal: number;
+  totalNights: number;
+  roomsCount: number;
+  paidDuringBooking: number;
+  balanceDue: number;
+  isPaidInFull: boolean;
+  successfulPayments: Array<{
+    id: string;
+    paymentNumber: string;
+    amount: number;
+    method: string;
+    paymentDate: string;
+    transactionReference?: string | null;
+  }>;
+}
+
+export async function getReservationPaymentSummaryAction(
+  reservationId: string
+): Promise<ActionResponse<ReservationPaymentSummary>> {
+  try {
+    await requirePermission('checkin:perform');
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        reservedRooms: true,
+        payments: {
+          where: { context: 'RESERVATION_ADVANCE' },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!reservation) {
+      return { success: false, error: 'Reservation not found' };
+    }
+
+    const roomRentTotal = Number(reservation.totalAmount);
+
+    const successfulPayments = reservation.payments
+      .filter((p) => p.status === 'SUCCESS')
+      .map((p) => ({
+        id: p.id,
+        paymentNumber: p.paymentNumber,
+        amount: Number(p.amount),
+        method: p.method,
+        paymentDate: p.paymentDate.toISOString(),
+        transactionReference: p.transactionReference,
+      }));
+
+    const paidDuringBooking = successfulPayments.reduce((sum, p) => sum + p.amount, 0);
+    const balanceDue = Math.max(0, roomRentTotal - paidDuringBooking);
+    const isPaidInFull = balanceDue <= 0;
+
+    const reservedRoom = reservation.reservedRooms[0];
+    const totalNights = reservedRoom?.totalNights || 1;
+    const roomsCount = reservation.totalRooms || 1;
+
+    return {
+      success: true,
+      data: {
+        reservationId: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        roomRentTotal,
+        totalNights,
+        roomsCount,
+        paidDuringBooking,
+        balanceDue,
+        isPaidInFull,
+        successfulPayments,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch payment summary',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 5c. GET EXISTING GUEST DOCUMENTS
+// Permission: 'checkin:perform'
+// ----------------------------------------------------
+export interface ExistingGuestDocument {
+  id: string;
+  documentType: string;
+  documentNumber: string;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number | null;
+  verificationStatus: string;
+  verifiedAt: string | null;
+  createdAt: string;
+}
+
+export async function getGuestDocumentsAction(
+  guestId: string
+): Promise<ActionResponse<ExistingGuestDocument[]>> {
+  try {
+    await requirePermission('checkin:perform');
+
+    const documents = await prisma.guestDocument.findMany({
+      where: { guestId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      success: true,
+      data: documents.map((doc) => ({
+        id: doc.id,
+        documentType: doc.documentType,
+        documentNumber: doc.documentNumber,
+        fileUrl: doc.fileUrl,
+        fileName: doc.fileName,
+        mimeType: doc.mimeType,
+        fileSize: doc.fileSize,
+        verificationStatus: doc.verificationStatus,
+        verifiedAt: doc.verifiedAt?.toISOString() || null,
+        createdAt: doc.createdAt.toISOString(),
+      })),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch guest documents',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 5d. GET EXISTING GUEST PHOTO
+// Permission: 'checkin:perform'
+// ----------------------------------------------------
+export interface ExistingGuestPhoto {
+  id: string;
+  fileUrl: string;
+  mimeType: string | null;
+  hasData: boolean;
+  capturedAt: string;
+}
+
+export async function getGuestPhotoAction(
+  guestId: string
+): Promise<ActionResponse<ExistingGuestPhoto | null>> {
+  try {
+    await requirePermission('checkin:perform');
+
+    const photo = await prisma.guestPhoto.findFirst({
+      where: { guestId },
+      orderBy: { capturedAt: 'desc' },
+    });
+
+    if (!photo) {
+      return { success: true, data: null };
+    }
+
+    return {
+      success: true,
+      data: {
+        id: photo.id,
+        fileUrl: photo.fileUrl,
+        mimeType: photo.mimeType || 'image/jpeg',
+        hasData: !!photo.fileDataBase64,
+        capturedAt: photo.capturedAt.toISOString(),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch guest photo',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 5e. VERIFY GUEST DOCUMENT
+// Permission: 'guest:manage'
+// ----------------------------------------------------
+export async function verifyGuestDocumentAction(
+  prevState: ActionResponse<{ documentId: string; status: string }> | null,
+  formData: FormData
+): Promise<ActionResponse<{ documentId: string; status: string }>> {
+  try {
+    const user = await requirePermission('guest:manage');
+
+    const raw = {
+      documentId: formData.get('documentId')?.toString() || '',
+      verificationStatus: formData.get('verificationStatus')?.toString() || '',
+    };
+
+    const parsed = guestDocumentVerifySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const doc = await prisma.guestDocument.findUnique({
+      where: { id: parsed.data.documentId },
+    });
+
+    if (!doc) {
+      return { success: false, error: 'Document not found' };
+    }
+
+    if (doc.verificationStatus === 'VERIFIED' && parsed.data.verificationStatus === 'VERIFIED') {
+      return { success: true, data: { documentId: doc.id, status: 'VERIFIED' } };
+    }
+
+    const updated = await prisma.guestDocument.update({
+      where: { id: parsed.data.documentId },
+      data: {
+        verificationStatus: parsed.data.verificationStatus as any,
+        verifiedById: parsed.data.verificationStatus === 'VERIFIED' ? user.id : doc.verifiedById,
+        verifiedAt: parsed.data.verificationStatus === 'VERIFIED' ? new Date() : doc.verifiedAt,
+      },
+    });
+
+    await recordAuditEvent({
+      userId: user.id,
+      action: 'GUEST_DOCUMENT_VERIFIED',
+      entity: 'GuestDocument',
+      entityId: doc.id,
+      newValues: {
+        previousStatus: doc.verificationStatus,
+        newStatus: parsed.data.verificationStatus,
+        documentType: doc.documentType,
+      },
+    });
+
+    return {
+      success: true,
+      data: { documentId: updated.id, status: updated.verificationStatus },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to verify document',
     };
   }
 }

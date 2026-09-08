@@ -31,6 +31,10 @@ export default async function CheckInPage({ params }: CheckInPageProps) {
       stays: {
         where: { status: 'ACTIVE' },
       },
+      payments: {
+        where: { context: 'RESERVATION_ADVANCE' },
+        orderBy: { createdAt: 'desc' },
+      },
     },
   });
 
@@ -45,11 +49,30 @@ export default async function CheckInPage({ params }: CheckInPageProps) {
     ? await getEligibleRoomsForCheckIn(undefined, roomTypeId, reservation.id, prisma)
     : [];
 
+  const successfulPayments = reservation.payments
+    .filter((p) => p.status === 'SUCCESS')
+    .map((p) => ({
+      id: p.id,
+      paymentNumber: p.paymentNumber,
+      amount: Number(p.amount),
+      method: p.method,
+      paymentDate: p.paymentDate.toISOString(),
+      transactionReference: p.transactionReference,
+    }));
+
+  const paidDuringBooking = successfulPayments.reduce((sum, p) => sum + p.amount, 0);
+  const roomRentTotal = Number(reservation.totalAmount);
+  const balanceDue = Math.max(0, roomRentTotal - paidDuringBooking);
+  const isPaidInFull = balanceDue <= 0;
+
   const serializedReservation = {
     id: reservation.id,
     reservationNumber: reservation.reservationNumber,
     checkInDate: reservation.checkInDate.toISOString(),
     checkOutDate: reservation.checkOutDate.toISOString(),
+    adults: reservation.adults,
+    children: reservation.children,
+    totalRooms: reservation.totalRooms,
     primaryGuest: {
       id: reservation.primaryGuest.id,
       firstName: reservation.primaryGuest.firstName,
@@ -63,7 +86,20 @@ export default async function CheckInPage({ params }: CheckInPageProps) {
         name: rr.roomType.name,
       },
       ratePerNight: rr.ratePerNight.toString(),
+      totalNights: rr.totalNights,
+      roomsCount: rr.roomsCount,
+      lineTotal: rr.lineTotal.toString(),
+      taxAmount: rr.taxAmount.toString(),
     })),
+    paymentSummary: {
+      roomRentTotal,
+      totalNights: reservedRoom?.totalNights || 1,
+      roomsCount: reservation.totalRooms || 1,
+      paidDuringBooking,
+      balanceDue,
+      isPaidInFull,
+      successfulPayments,
+    },
   };
 
   const serializedRooms = eligibleRooms.map((r) => ({

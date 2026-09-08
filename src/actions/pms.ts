@@ -16,6 +16,7 @@ import {
   amenitySchema,
   roomTypeAmenitiesSchema,
   roomAmenityOverrideSchema,
+  deleteEntitySchema,
 } from '@/validations/pms';
 import { validateManualStatusTransition } from '@/lib/pms/status-machine';
 import { executeBatchRoomGeneration, previewRoomGenerationCollisions } from '@/lib/pms/room-generator';
@@ -464,6 +465,7 @@ export async function generateRoomsAction(
           newValues: {
             createdCount: genResult.createdCount,
             roomNumbers: genResult.roomNumbers,
+            roomIds: genResult.roomIds,
             floorId: parsed.data.floorId,
             roomTypeId: parsed.data.roomTypeId,
           },
@@ -742,6 +744,278 @@ export async function setRoomAmenityOverrideAction(
 
     revalidatePath(`/admin/rooms/${parsed.data.roomId}`);
     return { success: true, data: override };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+// ----------------------------------------------------
+// 5. DELETION ACTIONS — Dependency-aware, transactional
+// ----------------------------------------------------
+
+export async function deleteBuildingAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('building:delete');
+
+    const raw = { entityId: formData.get('entityId')?.toString() || '' };
+    const parsed = deleteEntitySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const building = await tx.building.findUnique({
+        where: { id: parsed.data.entityId },
+        include: {
+          floors: {
+            include: {
+              _count: { select: { rooms: true } },
+            },
+          },
+        },
+      });
+
+      if (!building) {
+        throw new Error('Building not found.');
+      }
+
+      const floorCount = building.floors.length;
+      const roomCount = building.floors.reduce((sum, f) => sum + f._count.rooms, 0);
+
+      if (floorCount > 0 || roomCount > 0) {
+        throw new Error(
+          `Cannot delete building "${building.name}" because it contains ${floorCount} floor(s) and ${roomCount} room(s). Remove all floors and rooms first.`
+        );
+      }
+
+      await tx.building.delete({ where: { id: parsed.data.entityId } });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'BUILDING_DELETE',
+          entity: 'Building',
+          entityId: building.id,
+          oldValues: { name: building.name, code: building.code, propertyId: building.propertyId },
+        },
+        tx
+      );
+
+      return building;
+    });
+
+    revalidatePath('/admin/property');
+    revalidatePath('/admin/property/buildings');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+export async function deleteFloorAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('floor:delete');
+
+    const raw = { entityId: formData.get('entityId')?.toString() || '' };
+    const parsed = deleteEntitySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const floor = await tx.floor.findUnique({
+        where: { id: parsed.data.entityId },
+        include: {
+          _count: { select: { rooms: true } },
+          building: { select: { name: true } },
+        },
+      });
+
+      if (!floor) {
+        throw new Error('Floor not found.');
+      }
+
+      if (floor._count.rooms > 0) {
+        throw new Error(
+          `Cannot delete floor "${floor.name}" in ${floor.building.name} because it contains ${floor._count.rooms} room(s). Remove all rooms from this floor first.`
+        );
+      }
+
+      await tx.floor.delete({ where: { id: parsed.data.entityId } });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'FLOOR_DELETE',
+          entity: 'Floor',
+          entityId: floor.id,
+          oldValues: { name: floor.name, floorNumber: floor.floorNumber, buildingId: floor.buildingId },
+        },
+        tx
+      );
+
+      return floor;
+    });
+
+    revalidatePath('/admin/property');
+    revalidatePath('/admin/property/floors');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+export async function deleteRoomTypeAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('room:type:delete');
+
+    const raw = { entityId: formData.get('entityId')?.toString() || '' };
+    const parsed = deleteEntitySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const roomType = await tx.roomType.findUnique({
+        where: { id: parsed.data.entityId },
+        include: {
+          _count: {
+            select: {
+              rooms: true,
+              amenities: true,
+              ratePlans: true,
+              reservationItems: true,
+            },
+          },
+        },
+      });
+
+      if (!roomType) {
+        throw new Error('Room type not found.');
+      }
+
+      const dependencies: string[] = [];
+      if (roomType._count.rooms > 0) {
+        dependencies.push(`${roomType._count.rooms} physical room(s)`);
+      }
+      if (roomType._count.reservationItems > 0) {
+        dependencies.push(`${roomType._count.reservationItems} reservation(s)`);
+      }
+
+      if (dependencies.length > 0) {
+        throw new Error(
+          `Cannot delete room type "${roomType.name}" because it has: ${dependencies.join(', ')}. Remove or reassign them first.`
+        );
+      }
+
+      await tx.roomTypeAmenity.deleteMany({ where: { roomTypeId: parsed.data.entityId } });
+      await tx.roomRate.deleteMany({ where: { roomTypeId: parsed.data.entityId } });
+      await tx.roomType.delete({ where: { id: parsed.data.entityId } });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_TYPE_DELETE',
+          entity: 'RoomType',
+          entityId: roomType.id,
+          oldValues: { name: roomType.name, code: roomType.code, basePrice: roomType.basePrice.toString() },
+        },
+        tx
+      );
+
+      return roomType;
+    });
+
+    revalidatePath('/admin/rooms/types');
+    revalidatePath('/admin/rooms');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+export async function deleteRoomAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('room:delete');
+
+    const raw = { entityId: formData.get('entityId')?.toString() || '' };
+    const parsed = deleteEntitySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const room = await tx.room.findUnique({
+        where: { id: parsed.data.entityId },
+        include: {
+          roomType: { select: { name: true } },
+          floor: { select: { name: true } },
+        },
+      });
+
+      if (!room) {
+        throw new Error('Room not found.');
+      }
+
+      const activeStatuses = ['RESERVED', 'OCCUPIED', 'DIRTY', 'CLEANING', 'MAINTENANCE', 'OUT_OF_ORDER'];
+      if (activeStatuses.includes(room.status)) {
+        throw new Error(
+          `Cannot delete room "${room.roomNumber}" because it is currently ${room.status.replace(/_/g, ' ').toLowerCase()}. Only AVAILABLE rooms can be deleted.`
+        );
+      }
+
+      const assignmentCount = await tx.roomAssignment.count({
+        where: { roomId: parsed.data.entityId },
+      });
+
+      const dependencies: string[] = [];
+      if (assignmentCount > 0) {
+        dependencies.push(`${assignmentCount} room assignment(s)`);
+      }
+
+      if (dependencies.length > 0) {
+        throw new Error(
+          `Cannot delete room "${room.roomNumber}" because it has: ${dependencies.join(', ')}. Historical records must be preserved.`
+        );
+      }
+
+      await tx.roomAmenityOverride.deleteMany({ where: { roomId: parsed.data.entityId } });
+      await tx.room.delete({ where: { id: parsed.data.entityId } });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_DELETE',
+          entity: 'Room',
+          entityId: room.id,
+          oldValues: {
+            roomNumber: room.roomNumber,
+            status: room.status,
+            roomTypeId: room.roomTypeId,
+            floorId: room.floorId,
+          },
+        },
+        tx
+      );
+
+      return room;
+    });
+
+    revalidatePath('/admin/rooms');
+    revalidatePath('/admin/property');
+    return { success: true, data: result };
   } catch (error) {
     return { success: false, error: (error as Error).message };
   }

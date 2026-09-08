@@ -323,6 +323,10 @@ async function executeHoldCreation(
   // 9. Generate Collision-Resistant Reservation Number (RES-YYYYMMDD-XXXXXX)
   const reservationNumber = generateBookingNumber('RES');
 
+  const isPayAtHotel = input.paymentMethod === 'PAY_AT_HOTEL';
+  const initialStatus = isPayAtHotel ? ReservationStatus.CONFIRMED : ReservationStatus.PENDING;
+  const initialExpiresAt = isPayAtHotel ? null : dbExpiresAt;
+
   // 10. Atomic Insertion of Reservation & ReservationRooms
   const reservation = await tx.reservation.create({
     data: {
@@ -335,14 +339,14 @@ async function executeHoldCreation(
       children: input.children,
       totalRooms: totalRequestedRooms,
       source: BookingSource.DIRECT_WEBSITE,
-      status: ReservationStatus.PENDING,
+      status: initialStatus,
       specialRequests: input.specialRequests || null,
       subtotal: pricing.subtotal,
       discountAmount: pricing.discountAmount,
       taxAmount: pricing.taxAmount,
       totalAmount: pricing.totalAmount,
       advancePaidAmount: new Prisma.Decimal(0.0),
-      expiresAt: dbExpiresAt,
+      expiresAt: initialExpiresAt,
       reservedRooms: {
         create: pricing.lines.map((l) => ({
           roomTypeId: l.roomTypeId,
@@ -363,14 +367,15 @@ async function executeHoldCreation(
 
   await recordAuditEvent(
     {
-      action: 'RESERVATION_HOLD_CREATED',
+      action: isPayAtHotel ? 'RESERVATION_CONFIRMED_PAY_AT_HOTEL' : 'RESERVATION_HOLD_CREATED',
       entity: 'Reservation',
       entityId: reservation.id,
       newValues: {
         reservationNumber: reservation.reservationNumber,
         bookingRequestId: reservation.bookingRequestId,
         totalAmount: Number(reservation.totalAmount),
-        expiresAt: dbExpiresAt.toISOString(),
+        status: reservation.status,
+        expiresAt: initialExpiresAt ? initialExpiresAt.toISOString() : null,
       },
     },
     tx

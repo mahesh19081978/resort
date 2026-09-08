@@ -1,32 +1,17 @@
 import Link from 'next/link';
-import { prisma } from '@/lib/db/prisma';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ReservationStatus } from '@prisma/client';
 import { LogIn } from 'lucide-react';
+import { getExpectedArrivals, getBusinessDateNow } from '@/lib/frontdesk/arrivals';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ArrivalsPage() {
   await requirePermission('checkin:perform');
 
-  const pendingReservations = await prisma.reservation.findMany({
-    where: {
-      status: { in: [ReservationStatus.PENDING, ReservationStatus.CONFIRMED] },
-      stays: {
-        none: { status: 'ACTIVE' },
-      },
-    },
-    include: {
-      primaryGuest: true,
-      reservedRooms: {
-        include: { roomType: true },
-      },
-    },
-    orderBy: { checkInDate: 'asc' },
-    take: 50,
-  });
+  const businessDate = getBusinessDateNow();
+  const pendingReservations = await getExpectedArrivals(businessDate);
 
   return (
     <div className="space-y-6">

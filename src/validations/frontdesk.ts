@@ -37,6 +37,14 @@ export const guestDocumentUploadSchema = z.object({
   mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'], {
     message: 'Allowed formats: JPEG, PNG, WEBP, PDF',
   }),
+  existingDocumentId: z.string().cuid().optional(),
+});
+
+export const guestDocumentVerifySchema = z.object({
+  documentId: z.string().cuid({ message: 'Invalid document ID' }),
+  verificationStatus: z.enum(['VERIFIED', 'REJECTED'], {
+    message: 'Status must be VERIFIED or REJECTED',
+  }),
 });
 
 export const guestPhotoUploadSchema = z.object({
@@ -57,5 +65,6 @@ export const folioChargeSchema = z.object({
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type CheckOutInput = z.infer<typeof checkOutSchema>;
 export type GuestDocumentUploadInput = z.infer<typeof guestDocumentUploadSchema>;
+export type GuestDocumentVerifyInput = z.infer<typeof guestDocumentVerifySchema>;
 export type GuestPhotoUploadInput = z.infer<typeof guestPhotoUploadSchema>;
 export type FolioChargeInput = z.infer<typeof folioChargeSchema>;

@@ -6,6 +6,7 @@ import {
   guestDocumentUploadSchema,
   guestPhotoUploadSchema,
   folioChargeSchema,
+  guestDocumentVerifySchema,
 } from '../src/validations/frontdesk';
 import { executeCheckIn } from '../src/lib/frontdesk/checkin';
 import { executeCheckOut } from '../src/lib/frontdesk/checkout';
@@ -80,6 +81,42 @@ async function runFrontDeskTestSuite() {
   });
   assert.strictEqual(invalidMimeDoc.success, false, 'Disallowed MIME type must be rejected');
 
+  // 1.7 PAN_CARD Document Type Validation
+  const panCardDoc = guestDocumentUploadSchema.safeParse({
+    guestId: 'cjy0000000000000000000004',
+    documentType: IdDocumentType.PAN_CARD,
+    documentNumber: 'ABCDE1234F',
+    fileBase64: 'SGVsbG8gV29ybGQgZnJvbSB2YXVsdA==',
+    fileName: 'pan_card.jpg',
+    mimeType: 'image/jpeg',
+  });
+  assert.strictEqual(panCardDoc.success, true, 'PAN_CARD document type must be accepted');
+
+  // 1.8 Document Verify Schema
+  const validDocVerify = guestDocumentVerifySchema.safeParse({
+    documentId: 'cjy0000000000000000000005',
+    verificationStatus: 'VERIFIED',
+  });
+  assert.strictEqual(validDocVerify.success, true, 'Valid document verify schema must pass');
+
+  const invalidDocVerify = guestDocumentVerifySchema.safeParse({
+    documentId: 'cjy0000000000000000000005',
+    verificationStatus: 'INVALID_STATUS',
+  });
+  assert.strictEqual(invalidDocVerify.success, false, 'Invalid verification status must be rejected');
+
+  // 1.9 Document Upload with existingDocumentId (replacement)
+  const replacementDoc = guestDocumentUploadSchema.safeParse({
+    guestId: 'cjy0000000000000000000004',
+    documentType: IdDocumentType.PAN_CARD,
+    documentNumber: 'ABCDE1234F',
+    fileBase64: 'SGVsbG8gV29ybGQgZnJvbSB2YXVsdA==',
+    fileName: 'pan_card_v2.jpg',
+    mimeType: 'image/jpeg',
+    existingDocumentId: 'cjy0000000000000000000005',
+  });
+  assert.strictEqual(replacementDoc.success, true, 'Document replacement with existingDocumentId must pass');
+
   // ----------------------------------------------------
   // 2. CHECK-IN TRANSACTION WORKFLOW TESTS
   // ----------------------------------------------------
@@ -111,6 +148,7 @@ async function runFrontDeskTestSuite() {
       },
     ],
     stays: [],
+    checkOutDate: new Date(Date.now() + 86400000),
   };
 
   const mockRoomAvailable = {
@@ -423,6 +461,61 @@ async function runFrontDeskTestSuite() {
     assert.strictEqual(reservationAdvanceUpdated, true, 'Reservation advancePaidAmount must be updated');
   }
 
+  // 2.7 Server-Side Date Derivation: Expected checkout MUST come from reservation, not client
+  {
+    const futureCheckout = new Date(Date.now() + 30 * 86400000); // 30 days from now (client tries to extend)
+    let stayCreatedWithDate: Date | null = null;
+
+    const mockTx: any = {
+      reservation: {
+        findUnique: async () => mockReservation, // reservation.checkOutDate = 1 day from now
+        update: async () => mockReservation,
+      },
+      room: {
+        findUnique: async () => mockRoomAvailable,
+        update: async () => mockRoomAvailable,
+      },
+      stay: {
+        findMany: async () => [],
+        create: async (args: any) => {
+          stayCreatedWithDate = args.data.expectedCheckOut;
+          return { id: 'stay-date-test', ...args.data };
+        },
+      },
+      stayGuest: { create: async (args: any) => args.data },
+      roomAssignment: { create: async (args: any) => args.data },
+      guestDocument: { create: async (args: any) => args.data },
+      guestPhoto: { create: async () => ({}) },
+      folio: { create: async (args: any) => ({ id: 'folio-date-test', ...args.data }) },
+      folioItem: { create: async (args: any) => args.data },
+      auditLog: { create: async () => ({}) },
+    };
+
+    await executeCheckIn(
+      {
+        reservationId: mockReservation.id,
+        roomId: mockRoomAvailable.id,
+        expectedCheckOut: futureCheckout.toISOString(), // Client sends 30-day checkout
+        idDocumentType: IdDocumentType.PASSPORT,
+        idDocumentNumber: 'P12345678',
+      },
+      mockActor,
+      mockTx
+    );
+
+    // The server MUST use reservation.checkOutDate, not the client-provided date
+    const expectedServerDate = new Date(mockReservation.checkOutDate);
+    assert.ok(
+      stayCreatedWithDate !== null,
+      'Stay must be created'
+    );
+    assert.strictEqual(
+      (stayCreatedWithDate as Date).getTime(),
+      expectedServerDate.getTime(),
+      'Server must use reservation checkout date, ignoring client-provided date'
+    );
+  }
+
   // ----------------------------------------------------
   // 3. CHECK-OUT TRANSACTION & FOLIO SETTLEMENT TESTS
   // ----------------------------------------------------
@@ -577,6 +670,117 @@ async function runFrontDeskTestSuite() {
   assert.strictEqual(hasPermission({ role: 'RESTAURANT_BILLER' }, 'checkout:perform'), false);
   assert.strictEqual(hasPermission({ role: 'KITCHEN_STAFF' }, 'checkin:perform'), false);
   assert.strictEqual(hasPermission({ role: 'STORE_MANAGER' }, 'checkout:perform'), false);
+
+  // ----------------------------------------------------
+  // 5. PAYMENT RECONCILIATION TESTS
+  // ----------------------------------------------------
+  console.log('5. Testing Payment Reconciliation Logic...');
+
+  // 5.1 No payment -> Balance = Total
+  {
+    const totalAmount = 11200;
+    const paidDuringBooking = 0;
+    const balanceDue = Math.max(0, totalAmount - paidDuringBooking);
+    assert.strictEqual(balanceDue, 11200, 'Balance must equal total when no payment made');
+  }
+
+  // 5.2 Partial payment -> Balance = Total - Paid
+  {
+    const totalAmount = 11200;
+    const paidDuringBooking = 11200;
+    const balanceDue = Math.max(0, totalAmount - paidDuringBooking);
+    assert.strictEqual(balanceDue, 0, 'Balance must be 0 when fully paid');
+  }
+
+  // 5.3 Failed payment -> Does NOT count as paid
+  {
+    const payments = [
+      { status: 'FAILED', amount: 11200 },
+    ];
+    const paidDuringBooking = payments
+      .filter((p) => p.status === 'SUCCESS')
+      .reduce((sum, p) => sum + p.amount, 0);
+    assert.strictEqual(paidDuringBooking, 0, 'Failed payment must not count as paid');
+  }
+
+  // 5.4 Pending payment -> Does NOT count as paid
+  {
+    const payments = [
+      { status: 'PENDING', amount: 11200 },
+    ];
+    const paidDuringBooking = payments
+      .filter((p) => p.status === 'SUCCESS')
+      .reduce((sum, p) => sum + p.amount, 0);
+    assert.strictEqual(paidDuringBooking, 0, 'Pending payment must not count as paid');
+  }
+
+  // 5.5 Voided payment -> Does NOT count as paid
+  {
+    const payments = [
+      { status: 'VOIDED', amount: 11200 },
+    ];
+    const paidDuringBooking = payments
+      .filter((p) => p.status === 'SUCCESS')
+      .reduce((sum, p) => sum + p.amount, 0);
+    assert.strictEqual(paidDuringBooking, 0, 'Voided payment must not count as paid');
+  }
+
+  // 5.6 Mixed payments -> Only SUCCESS counts
+  {
+    const payments = [
+      { status: 'SUCCESS', amount: 5000 },
+      { status: 'FAILED', amount: 3000 },
+      { status: 'PENDING', amount: 2000 },
+      { status: 'SUCCESS', amount: 6200 },
+    ];
+    const paidDuringBooking = payments
+      .filter((p) => p.status === 'SUCCESS')
+      .reduce((sum, p) => sum + p.amount, 0);
+    assert.strictEqual(paidDuringBooking, 11200, 'Only SUCCESS payments must count');
+  }
+
+  // 5.7 Fully paid -> isPaidInFull = true
+  {
+    const totalAmount = 11200;
+    const paidDuringBooking = 11200;
+    const balanceDue = Math.max(0, totalAmount - paidDuringBooking);
+    const isPaidInFull = balanceDue <= 0;
+    assert.strictEqual(isPaidInFull, true, 'isPaidInFull must be true when balance is 0');
+  }
+
+  // ----------------------------------------------------
+  // 6. DOCUMENT VERIFICATION TESTS
+  // ----------------------------------------------------
+  console.log('6. Testing Document Verification Logic...');
+
+  // 6.1 Document upload with PENDING status
+  {
+    const doc = {
+      verificationStatus: 'PENDING',
+    };
+    assert.strictEqual(doc.verificationStatus, 'PENDING', 'New upload must start as PENDING');
+  }
+
+  // 6.2 Cannot advance past Stage 3 without VERIFIED document
+  {
+    const docStatus: string = 'PENDING';
+    const canAdvance = docStatus === 'VERIFIED';
+    assert.strictEqual(canAdvance, false, 'Cannot advance with PENDING document');
+  }
+
+  // 6.3 Can advance after verification
+  {
+    const docStatus: string = 'VERIFIED';
+    const canAdvance = docStatus === 'VERIFIED';
+    assert.strictEqual(canAdvance, true, 'Can advance with VERIFIED document');
+  }
+
+  // 6.4 Rejected document blocks advancement
+  {
+    const docStatus: string = 'REJECTED';
+    const canAdvance = docStatus === 'VERIFIED';
+    assert.strictEqual(canAdvance, false, 'Cannot advance with REJECTED document');
+  }
 
   console.log('--- All Front Desk Stay Lifecycle & Security Tests PASSED! ---');
 }

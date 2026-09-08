@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db/prisma';
 import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { PhysicalRoomStatus, StayStatus, ReservationStatus } from '@prisma/client';
+import { PhysicalRoomStatus, StayStatus } from '@prisma/client';
 import {
   LogIn,
   LogOut,
@@ -12,16 +12,17 @@ import {
   Building2,
   ArrowRight,
 } from 'lucide-react';
+import { getExpectedArrivalsCount, getBusinessDateNow } from '@/lib/frontdesk/arrivals';
 
 export const dynamic = 'force-dynamic';
 
 export default async function FrontDeskDashboardPage() {
   await requirePermission('booking:read');
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const businessDate = getBusinessDateNow();
+  const dayStart = new Date(`${businessDate}T00:00:00.000Z`);
+  const dayEnd = new Date(`${businessDate}T00:00:00.000Z`);
+  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
 
   const [
     arrivalsToday,
@@ -33,16 +34,11 @@ export default async function FrontDeskDashboardPage() {
     cleaningRooms,
     maintenanceRooms,
   ] = await Promise.all([
-    prisma.reservation.count({
-      where: {
-        checkInDate: { gte: today, lt: tomorrow },
-        status: { in: [ReservationStatus.CONFIRMED, ReservationStatus.PENDING] },
-      },
-    }),
+    getExpectedArrivalsCount(businessDate),
     prisma.stay.count({
       where: {
         status: StayStatus.ACTIVE,
-        expectedCheckOut: { gte: today, lt: tomorrow },
+        expectedCheckOut: { gte: dayStart, lt: dayEnd },
       },
     }),
     prisma.stay.count({

@@ -1,11 +1,13 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
 import type { Prisma } from '@prisma/client';
-import { requirePermission } from '@/lib/auth/auth';
+import { requirePermission, hasPermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Building, Plus, Layers } from 'lucide-react';
-import { createBuildingAction } from '@/actions/pms';
+import { createBuildingAction, deleteBuildingAction } from '@/actions/pms';
+import { DeleteEntityButton } from '@/components/admin';
+import { SubmitButton } from '@/components/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +27,8 @@ type PropertySelectItem = Prisma.PropertyGetPayload<{
 }>;
 
 export default async function BuildingsPage() {
-  await requirePermission('room:read');
+  const user = await requirePermission('room:read');
+  const canDelete = hasPermission(user, 'building:delete');
 
   let buildings: BuildingWithRelations[] = [];
   let properties: PropertySelectItem[] = [];
@@ -82,6 +85,7 @@ export default async function BuildingsPage() {
                     <th className="px-4 py-3">Code</th>
                     <th className="px-4 py-3">Property</th>
                     <th className="px-4 py-3">Floors & Rooms</th>
+                    {canDelete && <th className="px-4 py-3 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-resort-sand/60">
@@ -110,6 +114,25 @@ export default async function BuildingsPage() {
                           </span>{' '}
                           rooms
                         </td>
+                        {canDelete && (
+                          <td className="px-4 py-3 text-right">
+                            <DeleteEntityButton
+                              entityId={b.id}
+                              entityName={`${b.name} (${b.code})`}
+                              entityType="Building"
+                              dependencies={
+                                b.floors.length > 0
+                                  ? [
+                                      `${b.floors.length} floor(s)`,
+                                      `${b.floors.reduce((sum, f) => sum + f._count.rooms, 0)} room(s)`,
+                                    ]
+                                  : []
+                              }
+                              deleteAction={deleteBuildingAction}
+                              hasPermission={canDelete}
+                            />
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -178,9 +201,9 @@ export default async function BuildingsPage() {
                   />
                 </div>
 
-                <Button type="submit" variant="primary" size="sm" className="w-full gap-1 text-xs">
+                <SubmitButton type="submit" variant="primary" size="sm" className="w-full gap-1 text-xs" pendingLabel="Creating Building...">
                   <Plus className="h-3.5 w-3.5" /> Create Building
-                </Button>
+                </SubmitButton>
               </form>
             </CardContent>
           </Card>

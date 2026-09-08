@@ -73,6 +73,7 @@ enum RoomAssignmentStatus {
 
 enum IdDocumentType {
   AADHAAR
+  PAN_CARD
   PASSPORT
   DRIVING_LICENSE
   VOTER_ID
@@ -587,6 +588,7 @@ model GuestDocument {
   documentType       IdDocumentType
   documentNumber     String
   fileUrl            String
+  fileDataBase64     String?                    @db.Text
   fileName           String
   fileSize           Int?
   mimeType           String
@@ -604,13 +606,15 @@ model GuestDocument {
 }
 
 model GuestPhoto {
-  id           String   @id @default(cuid())
-  guestId      String
-  guest        Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  fileUrl      String
-  capturedById String?
-  capturedBy   User?    @relation("PhotoCapturer", fields: [capturedById], references: [id], onDelete: SetNull)
-  capturedAt   DateTime @default(now())
+  id             String    @id @default(cuid())
+  guestId        String
+  guest          Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  fileUrl        String
+  fileDataBase64 String?   @db.Text
+  mimeType       String?   @default("image/jpeg")
+  capturedById   String?
+  capturedBy     User?     @relation("PhotoCapturer", fields: [capturedById], references: [id], onDelete: SetNull)
+  capturedAt     DateTime  @default(now())
 
   @@index([guestId])
 }

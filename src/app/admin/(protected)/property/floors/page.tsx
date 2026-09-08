@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
 import type { Prisma } from '@prisma/client';
-import { requirePermission } from '@/lib/auth/auth';
+import { requirePermission, hasPermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Layers, Plus } from 'lucide-react';
-import { createFloorAction } from '@/actions/pms';
+import { createFloorAction, deleteFloorAction } from '@/actions/pms';
+import { DeleteEntityButton, SubmitButton } from '@/components/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,8 @@ type BuildingSelectItem = Prisma.BuildingGetPayload<{
 }>;
 
 export default async function FloorsPage() {
-  await requirePermission('room:read');
+  const user = await requirePermission('room:read');
+  const canDelete = hasPermission(user, 'floor:delete');
 
   let floors: FloorWithRelations[] = [];
   let buildings: BuildingSelectItem[] = [];
@@ -74,6 +76,7 @@ export default async function FloorsPage() {
                     <th className="px-4 py-3">Building</th>
                     <th className="px-4 py-3">Level Number</th>
                     <th className="px-4 py-3">Assigned Rooms</th>
+                    {canDelete && <th className="px-4 py-3 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-resort-sand/60">
@@ -98,6 +101,22 @@ export default async function FloorsPage() {
                         <td className="px-4 py-3">
                           <span className="font-semibold">{f._count.rooms}</span> rooms
                         </td>
+                        {canDelete && (
+                          <td className="px-4 py-3 text-right">
+                            <DeleteEntityButton
+                              entityId={f.id}
+                              entityName={`${f.name} (${f.building.name})`}
+                              entityType="Floor"
+                              dependencies={
+                                f._count.rooms > 0
+                                  ? [`${f._count.rooms} room(s)`]
+                                  : []
+                              }
+                              deleteAction={deleteFloorAction}
+                              hasPermission={canDelete}
+                            />
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -172,9 +191,9 @@ export default async function FloorsPage() {
                   />
                 </div>
 
-                <Button type="submit" variant="secondary" size="sm" className="w-full gap-1 text-xs">
+                <SubmitButton type="submit" variant="secondary" size="sm" className="w-full gap-1 text-xs" pendingLabel="Registering Floor...">
                   <Plus className="h-3.5 w-3.5" /> Register Floor
-                </Button>
+                </SubmitButton>
               </form>
             </CardContent>
           </Card>

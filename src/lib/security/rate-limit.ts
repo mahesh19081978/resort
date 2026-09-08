@@ -95,3 +95,7 @@ export async function checkRateLimit(
     resetMs: record.expiresAt - now,
   };
 }
+
+export function resetRateLimitStore(): void {
+  memoryStore.clear();
+}

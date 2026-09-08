@@ -101,6 +101,11 @@ export const roomAmenityOverrideSchema = z.object({
   notes: z.string().trim().max(255).optional(),
 });
 
+export const deleteEntitySchema = z.object({
+  entityId: z.string().cuid({ message: 'Invalid entity ID' }),
+});
+
+export type DeleteEntityInput = z.infer<typeof deleteEntitySchema>;
 export type PropertyUpdateInput = z.infer<typeof propertyUpdateSchema>;
 export type BuildingInput = z.infer<typeof buildingSchema>;
 export type FloorInput = z.infer<typeof floorSchema>;

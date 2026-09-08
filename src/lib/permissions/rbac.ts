@@ -22,7 +22,12 @@ export type Permission =
   | 'folio:settle'
   | 'room:read'
   | 'room:manage'
+  | 'room:delete'
+  | 'room:type:delete'
   | 'property:manage'
+  | 'property:delete'
+  | 'building:delete'
+  | 'floor:delete'
   | 'guest:read'
   | 'guest:manage'
   | 'guest:view_sensitive'
@@ -78,7 +83,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
-    'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
+    'room:read', 'room:manage', 'room:delete', 'room:type:delete',
+    'property:manage', 'property:delete', 'building:delete', 'floor:delete',
+    'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
@@ -94,7 +101,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   ADMIN: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
-    'room:read', 'room:manage', 'property:manage', 'guest:read', 'guest:manage', 'guest:view_sensitive',
+    'room:read', 'room:manage', 'room:delete', 'room:type:delete',
+    'property:manage', 'property:delete', 'building:delete', 'floor:delete',
+    'guest:read', 'guest:manage', 'guest:view_sensitive',
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',

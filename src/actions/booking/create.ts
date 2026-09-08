@@ -10,8 +10,10 @@ import { Prisma } from '@prisma/client';
 
 export interface BookingSubmissionResult {
   booking: SanitizedPublicBooking;
+  accessToken: string;
   checkoutUrl?: string;
   transactionReference?: string;
+  paymentToken?: string;
 }
 
 export async function createPublicBookingAction(
@@ -19,9 +21,17 @@ export async function createPublicBookingAction(
 ): Promise<ActionResult<BookingSubmissionResult>> {
   try {
     // 1. Ingress Rate Limiting
-    const headerList = await headers();
-    const forwardedFor = headerList.get('x-forwarded-for');
-    const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
+    let clientIp = '127.0.0.1';
+    try {
+      const headerList = await headers();
+      const forwardedFor = headerList.get('x-forwarded-for');
+      if (forwardedFor) {
+        clientIp = forwardedFor.split(',')[0].trim();
+      }
+    } catch {
+      // In test script or non-HTTP context, fallback gracefully to loopback
+      clientIp = '127.0.0.1';
+    }
 
     const rateLimit = await checkRateLimit(`booking:${clientIp}`, {
       limit: 5,
@@ -63,10 +73,45 @@ export async function createPublicBookingAction(
       }
     }
 
-    // 4. Create Reservation Hold under Pessimistic DB Lock
+    // 4. Policy Check for PAY_AT_HOTEL (Server-side authoritative)
+    const { getPaymentPolicy } = await import('@/lib/booking/policy');
+    const policy = getPaymentPolicy();
+
+    if (input.paymentMethod === 'PAY_AT_HOTEL') {
+      if (!policy.allowPayAtHotel) {
+        return fail(
+          'Pay at Hotel is currently not permitted. An advance payment is required.',
+          'BUSINESS_RULE_VIOLATION'
+        );
+      }
+    }
+
+    // 5. Create Reservation Hold or Confirmed Pay at Hotel under Pessimistic DB Lock
     const booking = await createReservationHold(input);
 
-    // 4. Initiate Payment Intent via Gateway SPI
+    // 6. Generate Short-Lived Scoped Access Tokens
+    const { createBookingAccessToken } = await import('@/lib/booking/tokens');
+    const statusAccessToken = await createBookingAccessToken(
+      booking.reservationId,
+      booking.reservationNumber,
+      'public_booking_status'
+    );
+
+    // 7. Handle Payment Method Routing
+    if (input.paymentMethod === 'PAY_AT_HOTEL') {
+      return ok({
+        booking,
+        accessToken: statusAccessToken,
+      });
+    }
+
+    // Initiate Payment Intent via Gateway SPI for PAY_ONLINE
+    const paymentToken = await createBookingAccessToken(
+      booking.reservationId,
+      booking.reservationNumber,
+      'public_payment'
+    );
+
     const paymentIntent = await defaultPaymentGateway.createPaymentIntent({
       reservationId: booking.reservationId,
       reservationNumber: booking.reservationNumber,
@@ -79,10 +124,17 @@ export async function createPublicBookingAction(
       },
     });
 
+    const channelQuery = input.onlineSubMethod ? `&channel=${encodeURIComponent(input.onlineSubMethod)}` : '';
+    const checkoutUrl = paymentIntent.checkoutUrl
+      ? `${paymentIntent.checkoutUrl}&token=${encodeURIComponent(paymentToken)}&statusToken=${encodeURIComponent(statusAccessToken)}${channelQuery}`
+      : undefined;
+
     return ok({
       booking,
-      checkoutUrl: paymentIntent.checkoutUrl,
+      accessToken: statusAccessToken,
+      checkoutUrl,
       transactionReference: paymentIntent.transactionReference,
+      paymentToken,
     });
   } catch (error: any) {
     console.error('[PUBLIC_BOOKING_ERROR]', error);

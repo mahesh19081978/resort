@@ -10,10 +10,13 @@ export interface ExecuteCheckInParams {
   idDocumentType: string;
   idDocumentNumber: string;
   documentStorageRef?: string;
+  documentDataBase64?: string;
   documentFileName?: string;
   documentMimeType?: string;
   documentFileSize?: number;
   photoStorageRef?: string;
+  photoDataBase64?: string;
+  photoMimeType?: string;
   notes?: string;
   advanceDepositAmount?: number;
   advanceDepositMethod?: string;
@@ -71,6 +74,10 @@ export async function executeCheckIn(
     }
 
     const reservedRoomType = reservation.reservedRooms[0].roomType;
+
+    // Server-side: Derive expectedCheckOut from the authoritative reservation checkout date
+    // The client-provided expectedCheckOut is IGNORED — the reservation is the source of truth
+    const expectedCheckoutDate = reservation.checkOutDate;
 
     const room = await tx.room.findUnique({
       where: { id: params.roomId },
@@ -150,6 +157,7 @@ export async function executeCheckIn(
           documentType: params.idDocumentType as any,
           documentNumber: params.idDocumentNumber,
           fileUrl: params.documentStorageRef || ('ref:internal-doc:' + Date.now()),
+          fileDataBase64: params.documentDataBase64 || null,
           fileName: params.documentFileName || (params.idDocumentType + '_doc.pdf'),
           mimeType: params.documentMimeType || 'application/pdf',
           fileSize: params.documentFileSize || null,
@@ -166,6 +174,8 @@ export async function executeCheckIn(
         data: {
           guestId: reservation.primaryGuestId,
           fileUrl: params.photoStorageRef,
+          fileDataBase64: params.photoDataBase64 || null,
+          mimeType: params.photoMimeType || 'image/jpeg',
           capturedById: actor.id,
           capturedAt: new Date(),
         },
@@ -177,7 +187,6 @@ export async function executeCheckIn(
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
     const stayNumber = 'STY-' + dateStr + '-' + randSuffix;
     const folioNumber = 'FOL-' + dateStr + '-' + randSuffix;
-    const expectedCheckoutDate = new Date(params.expectedCheckOut);
 
     const stay = await tx.stay.create({
       data: {

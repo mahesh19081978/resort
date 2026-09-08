@@ -1,18 +1,19 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
 import type { Prisma } from '@prisma/client';
-import { requirePermission } from '@/lib/auth/auth';
+import { requirePermission, hasPermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Plus, Layers, BedDouble, Users, Sparkles } from 'lucide-react';
-import { createRoomTypeAction, createAmenityAction } from '@/actions/pms';
+import { createRoomTypeAction, createAmenityAction, deleteRoomTypeAction } from '@/actions/pms';
+import { DeleteEntityButton, SubmitButton } from '@/components/admin';
 
 export const dynamic = 'force-dynamic';
 
 type RoomTypeWithDetails = Prisma.RoomTypeGetPayload<{
   include: {
     _count: {
-      select: { rooms: true };
+      select: { rooms: true; ratePlans: true; reservationItems: true };
     };
     amenities: {
       include: {
@@ -25,7 +26,8 @@ type RoomTypeWithDetails = Prisma.RoomTypeGetPayload<{
 type AmenityItem = Prisma.AmenityGetPayload<{}>;
 
 export default async function RoomTypesPage() {
-  await requirePermission('room:read');
+  const user = await requirePermission('room:read');
+  const canDelete = hasPermission(user, 'room:type:delete');
 
   let roomTypes: RoomTypeWithDetails[] = [];
   let amenities: AmenityItem[] = [];
@@ -35,7 +37,7 @@ export default async function RoomTypesPage() {
       prisma.roomType.findMany({
         include: {
           _count: {
-            select: { rooms: true },
+            select: { rooms: true, ratePlans: true, reservationItems: true },
           },
           amenities: {
             include: {
@@ -138,11 +140,32 @@ export default async function RoomTypesPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Link href={`/admin/rooms/types/${rt.id}`}>
-                              <Button variant="outline" size="sm" className="h-7 text-xs px-2.5">
-                                Configure
-                              </Button>
-                            </Link>
+                            <div className="flex items-center justify-end gap-2">
+                              {canDelete && (
+                                <DeleteEntityButton
+                                  entityId={rt.id}
+                                  entityName={`${rt.name} (${rt.code})`}
+                                  entityType="Room Type"
+                                  dependencies={
+                                    rt._count.reservationItems > 0 || rt._count.rooms > 0
+                                      ? [
+                                          ...(rt._count.rooms > 0 ? [`${rt._count.rooms} physical room(s)`] : []),
+                                          ...(rt._count.reservationItems > 0
+                                            ? [`${rt._count.reservationItems} reservation(s)`]
+                                            : []),
+                                        ]
+                                      : []
+                                  }
+                                  deleteAction={deleteRoomTypeAction}
+                                  hasPermission={canDelete}
+                                />
+                              )}
+                              <Link href={`/admin/rooms/types/${rt.id}`}>
+                                <Button variant="outline" size="sm" className="h-7 text-xs px-2.5">
+                                  Configure
+                                </Button>
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -312,9 +335,9 @@ export default async function RoomTypesPage() {
                   </div>
                 </div>
 
-                <Button type="submit" variant="primary" size="sm" className="w-full text-xs">
+                <SubmitButton type="submit" variant="primary" size="sm" className="w-full text-xs" pendingLabel="Creating Room Type...">
                   Create Room Type
-                </Button>
+                </SubmitButton>
               </form>
             </CardContent>
           </Card>
@@ -373,9 +396,9 @@ export default async function RoomTypesPage() {
                   />
                 </div>
 
-                <Button type="submit" variant="secondary" size="sm" className="w-full text-xs">
+                <SubmitButton type="submit" variant="secondary" size="sm" className="w-full text-xs" pendingLabel="Registering Amenity...">
                   Register Amenity
-                </Button>
+                </SubmitButton>
               </form>
             </CardContent>
           </Card>

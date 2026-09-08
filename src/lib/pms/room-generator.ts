@@ -75,87 +75,113 @@ export interface BatchGenerationParams {
   notes?: string;
 }
 
+export interface BatchGenerationResult {
+  createdCount: number;
+  roomNumbers: string[];
+  roomIds: string[];
+}
+
 /**
  * Transactional batch physical room generator with strict cross-property integrity validation.
  * If any room exists or relationship is invalid, rolls back everything atomically.
+ *
+ * IMPORTANT: This function MUST be called inside an existing Prisma transaction.
+ * The caller supplies the transaction client. This function never opens its own transaction.
  */
 export async function executeBatchRoomGeneration(
   params: BatchGenerationParams,
-  db: Prisma.TransactionClient | typeof prisma = prisma
-): Promise<{ createdCount: number; roomNumbers: string[] }> {
-  const runner = async (tx: Prisma.TransactionClient) => {
-    // 1. Cross-Property Integrity Verification:
-    // Floor must exist and belong to a Building in this Property
-    const floor = await tx.floor.findUnique({
-      where: { id: params.floorId },
-      include: { building: true },
-    });
+  tx: Prisma.TransactionClient
+): Promise<BatchGenerationResult> {
+  // 1. Cross-Property Integrity Verification:
+  // Floor must exist and belong to a Building in this Property
+  const floor = await tx.floor.findUnique({
+    where: { id: params.floorId },
+    include: { building: true },
+  });
 
-    if (!floor) {
-      throw new Error('FLOOR_NOT_FOUND: The specified floor does not exist.');
-    }
+  if (!floor) {
+    throw new Error('FLOOR_NOT_FOUND: The specified floor does not exist.');
+  }
 
-    if (floor.building.propertyId !== params.propertyId) {
-      throw new Error('CROSS_PROPERTY_VIOLATION: The specified floor does not belong to the target property.');
-    }
+  if (floor.building.propertyId !== params.propertyId) {
+    throw new Error('CROSS_PROPERTY_VIOLATION: The specified floor does not belong to the target property.');
+  }
 
-    // RoomType must exist
-    const roomType = await tx.roomType.findUnique({
-      where: { id: params.roomTypeId },
-    });
+  // RoomType must exist
+  const roomType = await tx.roomType.findUnique({
+    where: { id: params.roomTypeId },
+  });
 
-    if (!roomType) {
-      throw new Error('ROOM_TYPE_NOT_FOUND: The specified room type does not exist.');
-    }
+  if (!roomType) {
+    throw new Error('ROOM_TYPE_NOT_FOUND: The specified room type does not exist.');
+  }
 
-    // 2. Collision Detection
-    const collisionCheck = await previewRoomGenerationCollisions(
-      params.propertyId,
-      params.prefix,
-      params.startingNumber,
-      params.count,
-      tx
+  // 2. Collision Detection
+  const collisionCheck = await previewRoomGenerationCollisions(
+    params.propertyId,
+    params.prefix,
+    params.startingNumber,
+    params.count,
+    tx
+  );
+
+  if (collisionCheck.hasCollisions) {
+    throw new Error(
+      `ROOM_NUMBER_ALREADY_EXISTS: Cannot generate batch. Collisions detected for room numbers: [${collisionCheck.existingCollisions.join(', ')}]. Entire batch rolled back.`
     );
+  }
 
-    if (collisionCheck.hasCollisions) {
+  // 3. Deterministic Batch Creation — track actual created records
+  const createdIds: string[] = [];
+  const createdNumbers: string[] = [];
+
+  try {
+    for (const roomNumber of collisionCheck.roomNumbers) {
+      const room = await tx.room.create({
+        data: {
+          propertyId: params.propertyId,
+          floorId: params.floorId,
+          roomTypeId: params.roomTypeId,
+          roomNumber,
+          status: PhysicalRoomStatus.AVAILABLE,
+          notes: params.notes || null,
+        },
+        select: { id: true, roomNumber: true },
+      });
+      createdIds.push(room.id);
+      createdNumbers.push(room.roomNumber);
+    }
+  } catch (createErr: unknown) {
+    // Intercept database unique constraint violation (Prisma P2002 or native unique error)
+    const err = createErr as { code?: string; message?: string };
+    if (err?.code === 'P2002' || (typeof err?.message === 'string' && err.message.includes('unique constraint'))) {
       throw new Error(
-        `ROOM_NUMBER_ALREADY_EXISTS: Cannot generate batch. Collisions detected for room numbers: [${collisionCheck.existingCollisions.join(', ')}]. Entire batch rolled back.`
+        'ROOM_NUMBER_ALREADY_EXISTS: Concurrent insert collision detected. Room numbers must be unique within the property.'
       );
     }
-
-    // 3. Deterministic Batch Creation with unique constraint safety
-    try {
-      for (const roomNumber of collisionCheck.roomNumbers) {
-        await tx.room.create({
-          data: {
-            propertyId: params.propertyId,
-            floorId: params.floorId,
-            roomTypeId: params.roomTypeId,
-            roomNumber,
-            status: PhysicalRoomStatus.AVAILABLE,
-            notes: params.notes || null,
-          },
-        });
-      }
-    } catch (createErr: unknown) {
-      // Intercept database unique constraint violation (Prisma P2002 or native unique error)
-      const err = createErr as { code?: string; message?: string };
-      if (err?.code === 'P2002' || (typeof err?.message === 'string' && err.message.includes('unique constraint'))) {
-        throw new Error(
-          'ROOM_NUMBER_ALREADY_EXISTS: Concurrent insert collision detected. Room numbers must be unique within the property.'
-        );
-      }
-      throw createErr;
-    }
-
-    return {
-      createdCount: collisionCheck.roomNumbers.length,
-      roomNumbers: collisionCheck.roomNumbers,
-    };
-  };
-
-  if ('$transaction' in db && typeof db.$transaction === 'function') {
-    return await (db as typeof prisma).$transaction(runner);
+    throw createErr;
   }
-  return await runner(db as Prisma.TransactionClient);
+
+  // 4. In-transaction integrity assertion: verify all expected rooms exist
+  const verification = await tx.room.findMany({
+    where: {
+      id: { in: createdIds },
+    },
+    select: { id: true },
+  });
+
+  if (verification.length !== createdIds.length) {
+    const missingIds = createdIds.filter(
+      (id) => !verification.some((v) => v.id === id)
+    );
+    throw new Error(
+      `INTEGRITY_VIOLATION: After batch creation, ${missingIds.length} room(s) could not be verified in the database. IDs: [${missingIds.join(', ')}]. Rolling back.`
+    );
+  }
+
+  return {
+    createdCount: createdIds.length,
+    roomNumbers: createdNumbers,
+    roomIds: createdIds,
+  };
 }

@@ -119,12 +119,24 @@ async function runTests() {
   const testCheckIn = '2027-01-10';
   const testCheckOut = '2027-01-12'; // 2 nights
 
-  // Cleanup any lingering reservations from previous runs on these dates
+  // Cleanup any lingering reservations from previous runs on all test dates
   await prisma.reservationRoom.deleteMany({
-    where: { reservation: { checkInDate: new Date(`${testCheckIn}T00:00:00.000Z`) } },
+    where: {
+      reservation: {
+        OR: [
+          { checkInDate: { gte: new Date('2026-10-01T00:00:00.000Z') } },
+          { checkOutDate: { gte: new Date('2026-10-01T00:00:00.000Z') } },
+        ],
+      },
+    },
   });
   await prisma.reservation.deleteMany({
-    where: { checkInDate: new Date(`${testCheckIn}T00:00:00.000Z`) },
+    where: {
+      OR: [
+        { checkInDate: { gte: new Date('2026-10-01T00:00:00.000Z') } },
+        { checkOutDate: { gte: new Date('2026-10-01T00:00:00.000Z') } },
+      ],
+    },
   });
 
   // -------------------------------------------------------------
@@ -1202,8 +1214,634 @@ async function runTests() {
     throw err;
   }
 
+  // -------------------------------------------------------------
+  // Test 28: PAY_AT_HOTEL Policy-Driven Confirmation (Zero Advance)
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 28: PAY_AT_HOTEL Confirmation Invariant...');
+    const bReqId = uuid();
+    const payAtHotelBooking = await createReservationHold({
+      bookingRequestId: bReqId,
+      checkInDate: '2026-11-01',
+      checkOutDate: '2026-11-03',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Vijay',
+        lastName: 'Verma',
+        email: 'vijay.verma@example.com',
+        phone: '+919988776655',
+      },
+      paymentMethod: 'PAY_AT_HOTEL',
+    });
+
+    assert.strictEqual(payAtHotelBooking.status, ReservationStatus.CONFIRMED, 'Pay at Hotel must create CONFIRMED status when policy permits');
+    assert.strictEqual(payAtHotelBooking.advancePaidAmount, 0, 'Advance paid must be 0 for Pay at Hotel');
+    assert.strictEqual(payAtHotelBooking.expiresAt, null, 'Hold expiresAt must be null for Pay at Hotel');
+    assert.strictEqual(payAtHotelBooking.totalAmount > 0, true, 'Total amount must be calculated authoritatively');
+
+    // Verify in DB directly
+    const dbRecord = await prisma.reservation.findUnique({
+      where: { id: payAtHotelBooking.reservationId },
+    });
+    assert.strictEqual(dbRecord?.status, ReservationStatus.CONFIRMED);
+    assert.strictEqual(Number(dbRecord?.advancePaidAmount), 0);
+    assert.strictEqual(dbRecord?.expiresAt, null);
+
+    console.log('  ✓ PASS: PAY_AT_HOTEL confirmed with zero advance and null expiresAt\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 28:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 29: Mandatory Advance Deposit Policy Blocks PAY_AT_HOTEL
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 29: Mandatory Advance Deposit Blocks PAY_AT_HOTEL...');
+    const originalAdv = process.env.NEXT_PUBLIC_MANDATORY_ADVANCE;
+    process.env.NEXT_PUBLIC_MANDATORY_ADVANCE = 'true';
+
+    const { getPaymentPolicy } = await import('../src/lib/booking/policy');
+    const policy = getPaymentPolicy();
+    assert.strictEqual(policy.allowPayAtHotel, false, 'Policy must disallow Pay at Hotel when mandatory advance is required');
+
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const result = await createPublicBookingAction({
+      bookingRequestId: uuid(),
+      checkInDate: '2026-11-05',
+      checkOutDate: '2026-11-07',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Rohan',
+        lastName: 'Sharma',
+        email: 'rohan.sharma@example.com',
+        phone: '+919988776644',
+      },
+      paymentMethod: 'PAY_AT_HOTEL',
+    });
+
+    assert.strictEqual(result.success, false, 'Action must reject PAY_AT_HOTEL when advance is mandatory');
+    assert.strictEqual(result.error?.code, 'BUSINESS_RULE_VIOLATION');
+
+    // Restore env
+    if (originalAdv !== undefined) {
+      process.env.NEXT_PUBLIC_MANDATORY_ADVANCE = originalAdv;
+    } else {
+      delete process.env.NEXT_PUBLIC_MANDATORY_ADVANCE;
+    }
+
+    console.log('  ✓ PASS: Mandatory advance policy strictly blocks PAY_AT_HOTEL without bypass\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 29:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 30: PAY_ONLINE Payment Intent with Sub-Methods
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 30: PAY_ONLINE Payment Intent & Sub-Method Routing...');
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const result = await createPublicBookingAction({
+      bookingRequestId: uuid(),
+      checkInDate: '2026-11-10',
+      checkOutDate: '2026-11-12',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Ananya',
+        lastName: 'Roy',
+        email: 'ananya.roy@example.com',
+        phone: '+919871122334',
+      },
+      paymentMethod: 'PAY_ONLINE',
+      onlineSubMethod: 'UPI',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data?.booking.status, ReservationStatus.PENDING);
+    assert.strictEqual(typeof result.data?.checkoutUrl, 'string');
+    assert.strictEqual(result.data?.checkoutUrl ? result.data.checkoutUrl.includes('/booking/payment/mock') : false, true);
+
+    console.log('  ✓ PASS: PAY_ONLINE created PENDING hold and valid gateway checkout URL\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 30:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 31: Fail Closed BOOKING_TOKEN_SECRET Guard
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 31: Fail Closed BOOKING_TOKEN_SECRET Guard...');
+    const originalSecret = process.env.BOOKING_TOKEN_SECRET;
+    
+    // Test missing secret
+    delete process.env.BOOKING_TOKEN_SECRET;
+    const { createBookingAccessToken } = await import('../src/lib/booking/tokens');
+    let threwMissing = false;
+    try {
+      await createBookingAccessToken('res-1', 'RES-1', 'public_booking_status');
+    } catch (e: any) {
+      if (e.message.includes('Missing BOOKING_TOKEN_SECRET')) threwMissing = true;
+    }
+    assert.strictEqual(threwMissing, true, 'Missing secret must fail closed without fallback');
+
+    // Test secret < 32 characters
+    process.env.BOOKING_TOKEN_SECRET = 'too-short-secret';
+    let threwShort = false;
+    try {
+      await createBookingAccessToken('res-1', 'RES-1', 'public_booking_status');
+    } catch (e: any) {
+      if (e.message.includes('must be at least 32 characters long')) threwShort = true;
+    }
+    assert.strictEqual(threwShort, true, 'Short secret (< 32 chars) must fail closed');
+
+    // Restore original valid secret
+    process.env.BOOKING_TOKEN_SECRET = originalSecret;
+    console.log('  ✓ PASS: BOOKING_TOKEN_SECRET strictly fails closed without fallback\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 31:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 32: Token Scope Enforcement (No scope confusion)
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 32: Token Scope Enforcement...');
+    const { createBookingAccessToken, verifyBookingAccessToken } = await import('../src/lib/booking/tokens');
+    const paymentToken = await createBookingAccessToken('res-scope-test', 'RES-SCOPE-1', 'public_payment');
+    const statusToken = await createBookingAccessToken('res-scope-test', 'RES-SCOPE-1', 'public_booking_status');
+
+    // Trying to use payment token where status is expected
+    const crossCheck1 = await verifyBookingAccessToken(paymentToken, 'public_booking_status');
+    assert.strictEqual(crossCheck1, null, 'public_payment token must be rejected when expecting public_booking_status');
+
+    // Trying to use status token where payment is expected
+    const crossCheck2 = await verifyBookingAccessToken(statusToken, 'public_payment');
+    assert.strictEqual(crossCheck2, null, 'public_booking_status token must be rejected when expecting public_payment');
+
+    // Correct scopes succeed
+    const validStatus = await verifyBookingAccessToken(statusToken, 'public_booking_status');
+    assert.ok(validStatus);
+    assert.strictEqual(validStatus.resId, 'res-scope-test');
+
+    const validPayment = await verifyBookingAccessToken(paymentToken, 'public_payment');
+    assert.ok(validPayment);
+    assert.strictEqual(validPayment.resId, 'res-scope-test');
+
+    console.log('  ✓ PASS: Token scope enforcement strictly blocks scope substitution\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 32:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 33: getBookingStatusAction Rejects Raw CUID
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 33: getBookingStatusAction Rejects Raw CUID...');
+    const { getBookingStatusAction } = await import('../src/actions/booking/status');
+    const rawCuid = 'cmtrc98vf004bihog2oipbic0';
+
+    const resultWithoutToken = await getBookingStatusAction(rawCuid);
+    assert.strictEqual(resultWithoutToken.success, false);
+    assert.strictEqual(resultWithoutToken.error?.code, 'AUTHORIZATION_ERROR');
+    assert.strictEqual(
+      resultWithoutToken.error?.message.includes('valid signed booking access token is required'),
+      true
+    );
+
+    console.log('  ✓ PASS: Public booking status strictly rejects raw CUID without signed token\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 33:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 34: Mock Gateway Server-Side Production Guard
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 34: Mock Gateway Server-Side Production Guard...');
+    const originalEnv = process.env.NODE_ENV;
+    (process.env as any).NODE_ENV = 'production';
+
+    const { simulateMockGatewayPaymentAction } = await import('../src/actions/booking/payment-simulate');
+    const simResult = await simulateMockGatewayPaymentAction({
+      token: 'some.fake.token',
+      outcome: 'SUCCESS',
+    });
+
+    assert.strictEqual(simResult.success, false);
+    assert.strictEqual(simResult.error?.code, 'BUSINESS_RULE_VIOLATION');
+    assert.strictEqual(simResult.error?.message.includes('strictly prohibited in production'), true);
+
+    const { defaultPaymentGateway } = await import('../src/lib/booking/payment-provider');
+    let gatewayBlocked = false;
+    try {
+      await defaultPaymentGateway.createPaymentIntent({
+        reservationId: 'res-1',
+        reservationNumber: 'RES-1',
+        amount: new Prisma.Decimal(1000),
+        currency: 'INR',
+        guest: { name: 'Test', email: 'test@example.com', phone: '+919999999999' },
+      });
+    } catch (e: any) {
+      if (e.message.includes('Mock payment provider is strictly disallowed in production')) {
+        gatewayBlocked = true;
+      }
+    }
+    assert.strictEqual(gatewayBlocked, true, 'Provider SPI must throw in production');
+
+    // Restore env
+    (process.env as any).NODE_ENV = originalEnv;
+    console.log('  ✓ PASS: Mock gateway strictly blocked in production across both action and provider SPI\n');
+    passedCount++;
+  } catch (err) {
+    console.error('  ✗ FAIL Test 34:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 35: Full End-to-End Server-Side Mock Payment Simulation
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 35: Full End-to-End Server-Side Mock Payment Simulation...');
+    const { createBookingAccessToken } = await import('../src/lib/booking/tokens');
+    const { simulateMockGatewayPaymentAction } = await import('../src/actions/booking/payment-simulate');
+    const { getBookingStatusAction } = await import('../src/actions/booking/status');
+
+    // Create a real reservation hold
+    const booking = await createReservationHold({
+      bookingRequestId: uuid(),
+      checkInDate: '2027-03-01',
+      checkOutDate: '2027-03-03',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'EndToEnd',
+        lastName: 'SimUser',
+        email: `sim.${Date.now()}@example.com`,
+        phone: '+919876500111',
+      },
+    });
+
+    assert.strictEqual(booking.status, ReservationStatus.PENDING);
+
+    // Create payment token
+    const paymentToken = await createBookingAccessToken(
+      booking.reservationId,
+      booking.reservationNumber,
+      'public_payment'
+    );
+
+    // Simulate successful payment through server action
+    const simResult = await simulateMockGatewayPaymentAction({
+      token: paymentToken,
+      outcome: 'SUCCESS',
+    });
+
+    assert.strictEqual(simResult.success, true);
+    assert.ok(simResult.data?.statusAccessToken);
+
+    // Fetch booking status using the returned signed status access token
+    const statusResult = await getBookingStatusAction(booking.reservationId, simResult.data?.statusAccessToken);
+    assert.strictEqual(statusResult.success, true);
+    assert.strictEqual(statusResult.data?.status, ReservationStatus.CONFIRMED);
+    assert.strictEqual(statusResult.data?.advancePaidAmount, booking.totalAmount);
+
+    console.log('  ✓ PASS: Full server-side mock payment simulation verified with scoped tokens and status check\n');
+    passedCount++;
+
+    // Clean up
+    await prisma.payment.deleteMany({ where: { reservationId: booking.reservationId } });
+    await prisma.reservationRoom.deleteMany({ where: { reservationId: booking.reservationId } });
+    await prisma.reservation.delete({ where: { id: booking.reservationId } });
+  } catch (err) {
+    console.error('  ✗ FAIL Test 35:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 36: Full Public Booking Card Flow (create -> checkoutUrl -> simulate -> status)
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 36: Public Booking Card Flow with checkoutUrl and Scoped Tokens...');
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const { simulateMockGatewayPaymentAction } = await import('../src/actions/booking/payment-simulate');
+    const { getBookingStatusAction } = await import('../src/actions/booking/status');
+
+    const cardBookingRes = await createPublicBookingAction({
+      bookingRequestId: uuid(),
+      checkInDate: '2027-04-01',
+      checkOutDate: '2027-04-03',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA!.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Elena',
+        lastName: 'Rostova',
+        email: `elena.${Date.now()}@example.com`,
+        phone: '+919988776655',
+        city: 'Mumbai',
+      },
+      paymentMethod: 'PAY_ONLINE',
+      onlineSubMethod: 'CARD',
+    });
+
+    assert.strictEqual(cardBookingRes.success, true, 'Booking action must succeed');
+    assert.ok(cardBookingRes.data, 'Booking data must be returned');
+    assert.strictEqual(cardBookingRes.data.booking.status, ReservationStatus.PENDING);
+    assert.ok(cardBookingRes.data.checkoutUrl, 'checkoutUrl must be returned for PAY_ONLINE');
+
+    // Verify checkoutUrl contains both token (paymentToken) and statusToken (statusAccessToken)
+    const parsedUrl = new URL(cardBookingRes.data.checkoutUrl, 'http://localhost');
+    const paymentTokenFromUrl = parsedUrl.searchParams.get('token');
+    const statusTokenFromUrl = parsedUrl.searchParams.get('statusToken');
+
+    assert.ok(paymentTokenFromUrl, 'checkoutUrl must contain token query param');
+    assert.ok(statusTokenFromUrl, 'checkoutUrl must contain statusToken query param');
+    assert.strictEqual(paymentTokenFromUrl, cardBookingRes.data.paymentToken);
+    assert.strictEqual(statusTokenFromUrl, cardBookingRes.data.accessToken);
+
+    // Verify mock gateway loadBooking works with statusToken
+    const gatewayStatusLoad = await getBookingStatusAction(
+      cardBookingRes.data.booking.reservationId,
+      statusTokenFromUrl
+    );
+    assert.strictEqual(gatewayStatusLoad.success, true);
+    assert.strictEqual(gatewayStatusLoad.data?.reservationId, cardBookingRes.data.booking.reservationId);
+
+    // Simulate payment success via mock gateway action with paymentToken
+    const simRes = await simulateMockGatewayPaymentAction({
+      token: paymentTokenFromUrl,
+      outcome: 'SUCCESS',
+      channel: 'CARD',
+    });
+    assert.strictEqual(simRes.success, true);
+    assert.ok(simRes.data?.statusAccessToken);
+
+    // Authoritative check via statusAccessToken: status must now be CONFIRMED and hold expiresAt cleared
+    const confirmedCheck = await getBookingStatusAction(
+      cardBookingRes.data.booking.reservationId,
+      simRes.data.statusAccessToken
+    );
+    assert.strictEqual(confirmedCheck.success, true);
+    assert.strictEqual(confirmedCheck.data?.status, ReservationStatus.CONFIRMED);
+    assert.strictEqual(confirmedCheck.data?.advancePaidAmount, cardBookingRes.data.booking.totalAmount);
+    assert.strictEqual(confirmedCheck.data?.expiresAt, null);
+
+    console.log('  ✓ PASS: Card payment flow checkoutUrl with scoped tokens authoritatively confirms booking\n');
+    passedCount++;
+
+    // Clean up
+    await prisma.payment.deleteMany({ where: { reservationId: cardBookingRes.data.booking.reservationId } });
+    await prisma.reservationRoom.deleteMany({ where: { reservationId: cardBookingRes.data.booking.reservationId } });
+    await prisma.reservation.delete({ where: { id: cardBookingRes.data.booking.reservationId } });
+  } catch (err) {
+    console.error('  ✗ FAIL Test 36:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 37: End-to-End UPI Payment Flow (create -> checkoutUrl -> simulate UPI -> status)
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 37: End-to-End UPI Payment Flow...');
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const { simulateMockGatewayPaymentAction } = await import('../src/actions/booking/payment-simulate');
+    const { getBookingStatusAction } = await import('../src/actions/booking/status');
+
+    const upiBookingRes = await createPublicBookingAction({
+      bookingRequestId: uuid(),
+      checkInDate: '2027-05-01',
+      checkOutDate: '2027-05-03',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA!.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Vikram',
+        lastName: 'Malhotra',
+        email: `vikram.${Date.now()}@example.com`,
+        phone: '+919876500001',
+        city: 'Indore',
+      },
+      paymentMethod: 'PAY_ONLINE',
+      onlineSubMethod: 'UPI',
+    });
+
+    assert.strictEqual(upiBookingRes.success, true, 'UPI booking action must succeed');
+    assert.ok(upiBookingRes.data, 'UPI booking data must be returned');
+    assert.strictEqual(upiBookingRes.data.booking.status, ReservationStatus.PENDING);
+    assert.ok(upiBookingRes.data.checkoutUrl, 'checkoutUrl must be returned for UPI');
+
+    // Verify checkoutUrl contains token, statusToken, and channel=UPI
+    const parsedUrl = new URL(upiBookingRes.data.checkoutUrl, 'http://localhost');
+    const paymentTokenFromUrl = parsedUrl.searchParams.get('token');
+    const statusTokenFromUrl = parsedUrl.searchParams.get('statusToken');
+    const channelFromUrl = parsedUrl.searchParams.get('channel');
+
+    assert.ok(paymentTokenFromUrl, 'checkoutUrl must contain token query param');
+    assert.ok(statusTokenFromUrl, 'checkoutUrl must contain statusToken query param');
+    assert.strictEqual(channelFromUrl, 'UPI', 'checkoutUrl must contain channel=UPI param');
+    assert.strictEqual(paymentTokenFromUrl, upiBookingRes.data.paymentToken);
+    assert.strictEqual(statusTokenFromUrl, upiBookingRes.data.accessToken);
+
+    // Verify mock gateway status load succeeds with statusToken
+    const gatewayStatusLoad = await getBookingStatusAction(
+      upiBookingRes.data.booking.reservationId,
+      statusTokenFromUrl
+    );
+    assert.strictEqual(gatewayStatusLoad.success, true);
+    assert.strictEqual(gatewayStatusLoad.data?.reservationId, upiBookingRes.data.booking.reservationId);
+
+    // Simulate successful UPI payment via mock gateway action with paymentToken
+    const simRes = await simulateMockGatewayPaymentAction({
+      token: paymentTokenFromUrl,
+      outcome: 'SUCCESS',
+      channel: 'UPI',
+    });
+    assert.strictEqual(simRes.success, true);
+    assert.ok(simRes.data?.statusAccessToken);
+
+    // Authoritative check via statusAccessToken: status must now be CONFIRMED and hold expiresAt cleared
+    const confirmedCheck = await getBookingStatusAction(
+      upiBookingRes.data.booking.reservationId,
+      simRes.data.statusAccessToken
+    );
+    assert.strictEqual(confirmedCheck.success, true);
+    assert.strictEqual(confirmedCheck.data?.status, ReservationStatus.CONFIRMED);
+    assert.strictEqual(confirmedCheck.data?.advancePaidAmount, upiBookingRes.data.booking.totalAmount);
+    assert.strictEqual(confirmedCheck.data?.expiresAt, null);
+
+    // Verify payment ledger has exactly one SUCCESS entry
+    const payments = await prisma.payment.findMany({
+      where: { reservationId: upiBookingRes.data.booking.reservationId },
+    });
+    assert.strictEqual(payments.length, 1);
+    assert.strictEqual(payments[0].status, PaymentStatus.SUCCESS);
+
+    console.log('  ✓ PASS: End-to-end UPI payment verified with checkoutUrl, scoped tokens, and authoritative confirmation\n');
+    passedCount++;
+
+    // Clean up
+    await prisma.payment.deleteMany({ where: { reservationId: upiBookingRes.data.booking.reservationId } });
+    await prisma.reservationRoom.deleteMany({ where: { reservationId: upiBookingRes.data.booking.reservationId } });
+    await prisma.reservation.delete({ where: { id: upiBookingRes.data.booking.reservationId } });
+  } catch (err) {
+    console.error('  ✗ FAIL Test 37:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 38: UPI Failure / Retry
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 38: UPI Failure / Retry Flow...');
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const { simulateMockGatewayPaymentAction } = await import('../src/actions/booking/payment-simulate');
+    const { getBookingStatusAction } = await import('../src/actions/booking/status');
+
+    const failBookingRes = await createPublicBookingAction({
+      bookingRequestId: uuid(),
+      checkInDate: '2027-05-05',
+      checkOutDate: '2027-05-07',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA!.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Aditya',
+        lastName: 'Varma',
+        email: `aditya.${Date.now()}@example.com`,
+        phone: '+919876500002',
+      },
+      paymentMethod: 'PAY_ONLINE',
+      onlineSubMethod: 'UPI',
+    });
+
+    assert.strictEqual(failBookingRes.success, true);
+    assert.ok(failBookingRes.data?.paymentToken);
+    assert.ok(failBookingRes.data?.accessToken);
+
+    // Simulate FAILED payment
+    const simFail = await simulateMockGatewayPaymentAction({
+      token: failBookingRes.data.paymentToken,
+      outcome: 'FAILED',
+      channel: 'UPI',
+    });
+    assert.strictEqual(simFail.success, true); // simulation action succeeded
+
+    // Verify reservation remains PENDING and hold is still active
+    const postFailCheck = await getBookingStatusAction(
+      failBookingRes.data.booking.reservationId,
+      failBookingRes.data.accessToken
+    );
+    assert.strictEqual(postFailCheck.success, true);
+    assert.strictEqual(postFailCheck.data?.status, ReservationStatus.PENDING);
+    assert.ok(postFailCheck.data?.expiresAt, 'Hold must remain active');
+
+    // Verify retry simulation with SUCCESS on the same reservation
+    const retrySuccess = await simulateMockGatewayPaymentAction({
+      token: failBookingRes.data.paymentToken,
+      outcome: 'SUCCESS',
+      channel: 'UPI',
+    });
+    assert.strictEqual(retrySuccess.success, true);
+    assert.ok(retrySuccess.data?.statusAccessToken);
+
+    const retryCheck = await getBookingStatusAction(
+      failBookingRes.data.booking.reservationId,
+      retrySuccess.data.statusAccessToken
+    );
+    assert.strictEqual(retryCheck.success, true);
+    assert.strictEqual(retryCheck.data?.status, ReservationStatus.CONFIRMED);
+
+    console.log('  ✓ PASS: UPI failure preserves PENDING hold and allows seamless retry on same reservation\n');
+    passedCount++;
+
+    // Clean up
+    await prisma.payment.deleteMany({ where: { reservationId: failBookingRes.data.booking.reservationId } });
+    await prisma.reservationRoom.deleteMany({ where: { reservationId: failBookingRes.data.booking.reservationId } });
+    await prisma.reservation.delete({ where: { id: failBookingRes.data.booking.reservationId } });
+  } catch (err) {
+    console.error('  ✗ FAIL Test 38:', err);
+    throw err;
+  }
+
+  // -------------------------------------------------------------
+  // Test 39: UPI Duplicate Submission Idempotency
+  // -------------------------------------------------------------
+  try {
+    console.log('Running Test 39: UPI Duplicate Submission Idempotency...');
+    const { createPublicBookingAction } = await import('../src/actions/booking/create');
+    const { resetRateLimitStore } = await import('../src/lib/security/rate-limit');
+    resetRateLimitStore();
+
+    const requestId = uuid();
+    const upiPayload = {
+      bookingRequestId: requestId,
+      checkInDate: '2027-05-10',
+      checkOutDate: '2027-05-12',
+      adults: 2,
+      children: 0,
+      rooms: [{ roomTypeId: rtA!.id, roomsCount: 1 }],
+      guest: {
+        firstName: 'Pooja',
+        lastName: 'Nair',
+        email: `pooja.${Date.now()}@example.com`,
+        phone: '+919876500003',
+      },
+      paymentMethod: 'PAY_ONLINE' as const,
+      onlineSubMethod: 'UPI' as const,
+    };
+
+    // First call
+    const firstSubmission = await createPublicBookingAction(upiPayload);
+    assert.strictEqual(firstSubmission.success, true, `First submission should succeed: ${firstSubmission.error?.message}`);
+
+    // Second rapid call with identical bookingRequestId
+    const secondSubmission = await createPublicBookingAction(upiPayload);
+    assert.strictEqual(secondSubmission.success, true);
+
+    // Both submissions must resolve to the identical reservation
+    assert.strictEqual(
+      firstSubmission.data?.booking.reservationId,
+      secondSubmission.data?.booking.reservationId,
+      'Duplicate submissions with same bookingRequestId must yield same reservation'
+    );
+
+    // Total reservations created with this number must be exactly 1
+    const resCount = await prisma.reservation.count({
+      where: { id: firstSubmission.data!.booking.reservationId },
+    });
+    assert.strictEqual(resCount, 1);
+
+    console.log('  ✓ PASS: UPI duplicate submission with same bookingRequestId preserves idempotency without duplicate reservations\n');
+    passedCount++;
+
+    // Clean up
+    await prisma.reservationRoom.deleteMany({ where: { reservationId: firstSubmission.data!.booking.reservationId } });
+    await prisma.reservation.delete({ where: { id: firstSubmission.data!.booking.reservationId } });
+  } catch (err) {
+    console.error('  ✗ FAIL Test 39:', err);
+    throw err;
+  }
+
   console.log('===============================================================');
-  console.log(`Phase 0.8 Automated Verification Summary: ${passedCount}/${totalTests} PASSED`);
+  console.log(`Phase 0.8 Automated Verification Summary: ${passedCount}/39 PASSED`);
   console.log('===============================================================\n');
 }
 

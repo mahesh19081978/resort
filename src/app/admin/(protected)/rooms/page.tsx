@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db/prisma';
 import type { Prisma } from '@prisma/client';
-import { requirePermission } from '@/lib/auth/auth';
+import { requirePermission, hasPermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PhysicalRoomStatus } from '@prisma/client';
-import { updateRoomStatusAction } from '@/actions/pms';
+import { updateRoomStatusAction, deleteRoomAction } from '@/actions/pms';
+import { DeleteEntityButton } from '@/components/admin';
 import {
   BedDouble,
   Plus,
@@ -58,7 +59,8 @@ type RoomWithRelations = Prisma.RoomGetPayload<{
 }>;
 
 export default async function RoomsPage({ searchParams }: RoomsPageProps) {
-  await requirePermission('room:read');
+  const user = await requirePermission('room:read');
+  const canDelete = hasPermission(user, 'room:delete');
   const params = await searchParams;
 
   // Strict server-side filter validation: only allow legitimate PhysicalRoomStatus enum values
@@ -406,11 +408,22 @@ export default async function RoomsPage({ searchParams }: RoomsPageProps) {
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link href={`/admin/rooms/${room.id}`}>
-                          <Button variant="outline" size="sm" className="h-7 text-xs px-2.5">
-                            View Details
-                          </Button>
-                        </Link>
+                        <div className="flex items-center justify-end gap-2">
+                          {canDelete && room.status === 'AVAILABLE' && (
+                            <DeleteEntityButton
+                              entityId={room.id}
+                              entityName={`Room ${room.roomNumber}`}
+                              entityType="Room"
+                              deleteAction={deleteRoomAction}
+                              hasPermission={canDelete}
+                            />
+                          )}
+                          <Link href={`/admin/rooms/${room.id}`}>
+                            <Button variant="outline" size="sm" className="h-7 text-xs px-2.5">
+                              View Details
+                            </Button>
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))

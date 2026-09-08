@@ -31,6 +31,8 @@ export const createBookingRequestSchema = z
     children: z.coerce.number().int().min(0).max(10).default(0),
     rooms: z.array(roomBookingItemSchema).min(1, 'At least one room category must be selected'),
     guest: guestContactSchema,
+    paymentMethod: z.enum(['PAY_ONLINE', 'PAY_AT_HOTEL']).default('PAY_ONLINE'),
+    onlineSubMethod: z.enum(['CARD', 'UPI', 'NET_BANKING']).optional(),
     specialRequests: z.string().trim().max(500).optional(),
     turnstileToken: z.string().optional(),
   })

@@ -18,12 +18,25 @@ import {
   Loader2,
   Lock,
   ArrowRight,
+  CreditCard,
+  Building,
+  Clock,
+  CheckCircle2,
 } from 'lucide-react';
 import { IMAGES, RESORT } from '@/constants/images';
 import { SectionHeading } from '@/components/public/SectionHeading';
 import { ScrollReveal } from '@/components/public/ScrollReveal';
 import { createPublicBookingAction } from '@/actions/booking/create';
+import { getBookingStatusAction } from '@/actions/booking/status';
 import { formatCurrency } from '@/lib/utils';
+import { SanitizedPublicBooking } from '@/lib/booking/reservation-service';
+import { PaymentMethodSelector } from '@/components/booking/payment/PaymentMethodSelector';
+import { PaymentChannelTabs, OnlineSubMethod } from '@/components/booking/payment/PaymentChannelTabs';
+import { CardPaymentForm } from '@/components/booking/payment/CardPaymentForm';
+import { UpiPaymentPanel } from '@/components/booking/payment/UpiPaymentPanel';
+import { NetBankingPanel } from '@/components/booking/payment/NetBankingPanel';
+import { PaymentSummaryBreakdown } from '@/components/booking/payment/PaymentSummaryBreakdown';
+import { PaymentSecurityTrust } from '@/components/booking/payment/PaymentSecurityTrust';
 
 // Helper to generate a client UUID for request idempotency
 function generateUUID(): string {
@@ -65,8 +78,8 @@ function BookingForm() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const today = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const [today] = useState(() => new Date().toISOString().split('T')[0]);
+  const [tomorrow] = useState(() => new Date(Date.now() + 86400000).toISOString().split('T')[0]);
 
   // Search & Room State
   const [checkIn, setCheckIn] = useState(searchParams.get('checkIn') || today);
@@ -84,18 +97,73 @@ function BookingForm() {
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
 
+  // Payment Method Selection
+  const [paymentMethod, setPaymentMethod] = useState<'PAY_ONLINE' | 'PAY_AT_HOTEL'>('PAY_ONLINE');
+  const [onlineSubMethod, setOnlineSubMethod] = useState<'CARD' | 'UPI' | 'NET_BANKING'>('CARD');
+
   // Dynamic Available Room Types
   const [availableTypes, setAvailableTypes] = useState<any[]>([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
 
-  // Submission / Wizard State
+  // Policy State
+  const [allowPayAtHotel, setAllowPayAtHotel] = useState(true);
+
+  // Submission / Flow State
   const [bookingRequestId] = useState(() => generateUUID());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [confirmedBooking, setConfirmedBooking] = useState<any | null>(null);
+
+  // Hold State vs Confirmed State
+  const [activeHold, setActiveHold] = useState<SanitizedPublicBooking | null>(null);
+  const [confirmedBooking, setConfirmedBooking] = useState<SanitizedPublicBooking | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  const confirmedIdFromUrl = searchParams.get('confirmedId');
 
   useEffect(() => {
     document.title = 'Book Your Stay — Infinity Resort';
+    const isPayAtHotelDisabled =
+      process.env.NEXT_PUBLIC_ALLOW_PAY_AT_HOTEL === 'false' ||
+      process.env.NEXT_PUBLIC_MANDATORY_ADVANCE === 'true';
+    setAllowPayAtHotel(!isPayAtHotelDisabled);
   }, []);
+
+  // Check URL params for confirmed return from payment gateway using signed token
+  const tokenFromUrl = searchParams.get('token');
+
+  useEffect(() => {
+    if (tokenFromUrl) {
+      getBookingStatusAction(tokenFromUrl).then((res) => {
+        if (res.success && res.data) {
+          setConfirmedBooking(res.data);
+          setActiveHold(null);
+        }
+      });
+    }
+  }, [tokenFromUrl]);
+
+  // Hold Timer countdown
+  useEffect(() => {
+    if (!activeHold || !activeHold.expiresAt) {
+      setSecondsRemaining(null);
+      return;
+    }
+
+    const expiryTime = new Date(activeHold.expiresAt).getTime();
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const diff = Math.max(0, Math.floor((expiryTime - now) / 1000));
+      setSecondsRemaining(diff);
+
+      if (diff <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeHold]);
 
   // Fetch real RoomTypes from availability
   useEffect(() => {
@@ -124,6 +192,16 @@ function BookingForm() {
   }, [checkIn, checkOut, adults, children]);
 
   const selectedRoom = availableTypes.find((r) => r.roomTypeId === roomTypeId) || availableTypes[0];
+
+  // Calculate stay duration and authoritative preview numbers
+  const nightsCount = Math.max(
+    1,
+    Math.round(
+      (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)
+    ) || 1
+  );
+  const estimatedStayTotal = (selectedRoom?.basePrice || 0) * nightsCount * (Number(roomsCount) || 1) * 1.18;
+  const formattedTotalPayable = formatCurrency(Math.round(estimatedStayTotal));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,62 +232,129 @@ function BookingForm() {
           phone,
           city: city || undefined,
         },
+        paymentMethod,
+        onlineSubMethod: paymentMethod === 'PAY_ONLINE' ? onlineSubMethod : undefined,
         specialRequests: specialRequests || undefined,
       });
 
       if (!result.success) {
-        setErrorMessage(result.error?.message || 'Failed to complete booking. Please try again.');
+        let msg = result.error?.message || 'Failed to complete booking. Please try again.';
+        if (result.error?.details && typeof result.error.details === 'object') {
+          const fieldMsgs = Object.entries(result.error.details)
+            .flatMap(([field, errors]: [string, any]) =>
+              Array.isArray(errors) ? errors.map((e: string) => `${field}: ${e}`) : []
+            )
+            .filter(Boolean);
+          if (fieldMsgs.length > 0) {
+            msg = `${msg} (${fieldMsgs.join('; ')})`;
+          }
+        }
+        setErrorMessage(msg);
         return;
       }
 
       if (result.data) {
-        setConfirmedBooking(result.data.booking);
+        if (result.data.booking.status === 'CONFIRMED') {
+          setConfirmedBooking(result.data.booking);
+          setActiveHold(null);
+        } else if (result.data.checkoutUrl) {
+          setIsRedirecting(true);
+          router.push(result.data.checkoutUrl);
+        } else {
+          setActiveHold(result.data.booking);
+          setCheckoutUrl(result.data.checkoutUrl || null);
+        }
       }
     });
   };
 
+  // ──────────────────────────────────────────────────────────
+  // SCREEN 1: CONFIRMED BOOKING (Online Success or Pay at Hotel)
+  // ──────────────────────────────────────────────────────────
   if (confirmedBooking) {
+    const isPayAtHotelBooking = confirmedBooking.advancePaidAmount === 0 && confirmedBooking.totalAmount > 0;
+    const balanceDue = confirmedBooking.totalAmount - confirmedBooking.advancePaidAmount;
+
     return (
       <section className="section-padding">
         <div className="container-resort max-w-3xl mx-auto text-center">
           <ScrollReveal>
-            <div className="bg-white rounded-2xl shadow-luxury-lg p-10 md:p-14">
-              <div className="w-20 h-20 rounded-full bg-resort-forest/10 flex items-center justify-center mx-auto mb-6">
-                <Check className="h-10 w-10 text-resort-forest" />
+            <div className="bg-white rounded-2xl shadow-luxury-lg p-8 md:p-12 border border-resort-sand/60">
+              <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-6 text-emerald-600">
+                <CheckCircle2 className="h-10 w-10" />
               </div>
-              <span className="inline-block px-4 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-semibold uppercase tracking-wider mb-3">
-                Hold Created (15-Min Window)
+              <span className="inline-block px-4 py-1 rounded-full bg-emerald-50 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-3">
+                Confirmed Reservation
               </span>
               <h3 className="font-display text-2xl md:text-3xl font-medium text-resort-charcoal-text mb-2">
-                Reservation Held!
+                Booking Confirmed!
               </h3>
-              <p className="text-sm font-semibold text-resort-forest mb-4">
-                Booking Reference: {confirmedBooking.reservationNumber}
+              <p className="text-sm font-semibold text-resort-forest mb-4 font-mono">
+                Reservation Number: {confirmedBooking.reservationNumber}
               </p>
               <p className="text-resort-muted max-w-md mx-auto mb-8 text-sm leading-relaxed">
-                Your room hold has been securely locked in. A confirmation has been registered for {confirmedBooking.maskedGuestName} ({confirmedBooking.maskedEmail}).
+                Thank you! Your luxury stay has been officially confirmed for {confirmedBooking.maskedGuestName}. A confirmation has been registered for {confirmedBooking.maskedEmail}.
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-                <div className="p-3 rounded-xl bg-resort-sand/40">
+              {/* Booking & Financial Summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6 text-left">
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
                   <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Check-in</p>
                   <p className="text-sm font-medium text-resort-charcoal-text">{confirmedBooking.checkInDate}</p>
                 </div>
-                <div className="p-3 rounded-xl bg-resort-sand/40">
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
                   <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Check-out</p>
                   <p className="text-sm font-medium text-resort-charcoal-text">{confirmedBooking.checkOutDate}</p>
                 </div>
-                <div className="p-3 rounded-xl bg-resort-sand/40">
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
                   <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Room Category</p>
-                  <p className="text-sm font-medium text-resort-charcoal-text">
-                    {confirmedBooking.rooms[0]?.roomTypeName || 'Room'}
+                  <p className="text-sm font-medium text-resort-charcoal-text truncate">
+                    {confirmedBooking.rooms[0]?.roomTypeName || 'Suite'}
                   </p>
                 </div>
-                <div className="p-3 rounded-xl bg-resort-sand/40">
-                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Total Payable</p>
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
+                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Total Guests</p>
                   <p className="text-sm font-medium text-resort-charcoal-text">
-                    {formatCurrency(confirmedBooking.totalAmount)}
+                    {confirmedBooking.adults} Adults {confirmedBooking.children > 0 ? `, ${confirmedBooking.children} Child` : ''}
                   </p>
+                </div>
+              </div>
+
+              {/* Payment Ledger Breakdown */}
+              <div className="p-5 rounded-2xl bg-resort-sand/20 border border-resort-sand/60 mb-8 text-left">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-resort-muted mb-3">
+                  Payment & Balance Breakdown
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-resort-muted">Payment Method</span>
+                    <span className="font-medium text-resort-charcoal-text">
+                      {isPayAtHotelBooking ? 'Pay at Hotel' : 'Online Payment (Gateway)'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-resort-muted">Total Booking Amount</span>
+                    <span className="font-medium text-resort-charcoal-text">
+                      {formatCurrency(confirmedBooking.totalAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-resort-muted">Amount Paid Advance</span>
+                    <span className="font-semibold text-emerald-700">
+                      {formatCurrency(confirmedBooking.advancePaidAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-resort-sand/60 text-base font-bold">
+                    <span className="text-resort-charcoal-text">Outstanding Balance Due</span>
+                    <span className="text-resort-forest">
+                      {formatCurrency(balanceDue)}
+                    </span>
+                  </div>
+                  {isPayAtHotelBooking && (
+                    <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-lg mt-3">
+                      Please settle the outstanding balance of {formatCurrency(balanceDue)} at the front desk upon arrival.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -220,6 +365,104 @@ function BookingForm() {
                 >
                   Return to Home
                 </button>
+              </div>
+            </div>
+          </ScrollReveal>
+        </div>
+      </section>
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // SCREEN 2: PENDING HOLD SCREEN (15-Minute Window & Pay Online)
+  // ──────────────────────────────────────────────────────────
+  if (activeHold) {
+    const isExpired = secondsRemaining !== null && secondsRemaining <= 0;
+    const formatTime = (secs: number) => {
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    return (
+      <section className="section-padding">
+        <div className="container-resort max-w-3xl mx-auto text-center">
+          <ScrollReveal>
+            <div className="bg-white rounded-2xl shadow-luxury-lg p-8 md:p-12 border border-amber-200/80">
+              {/* Warning/Pending Badge */}
+              <div className="w-20 h-20 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-6 text-amber-600">
+                <Clock className="h-10 w-10 animate-pulse" />
+              </div>
+              <span className="inline-block px-4 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold uppercase tracking-wider mb-3">
+                Temporary Hold Active
+              </span>
+              <h3 className="font-display text-2xl md:text-3xl font-medium text-resort-charcoal-text mb-2">
+                Your Room is Held
+              </h3>
+              <p className="text-sm text-resort-muted max-w-md mx-auto mb-4 leading-relaxed">
+                Your room is temporarily held for 15 minutes. Complete payment to confirm your reservation.
+              </p>
+
+              {/* Hold Expiration Counter */}
+              <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-50 border border-amber-200 mb-6">
+                <Clock className="h-4 w-4 text-amber-700" />
+                <span className="text-xs font-semibold text-amber-900">
+                  Hold Expires In:{' '}
+                  <span className="font-mono text-sm font-bold text-amber-700">
+                    {secondsRemaining !== null ? formatTime(secondsRemaining) : '15:00'}
+                  </span>
+                </span>
+              </div>
+
+              {isExpired ? (
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm mb-6">
+                  This reservation hold has expired. The inventory has been released back into available pool. Please restart your booking.
+                </div>
+              ) : null}
+
+              {/* Hold Details Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8 text-left">
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
+                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Hold Reference</p>
+                  <p className="text-sm font-mono font-bold text-resort-charcoal-text truncate">
+                    {activeHold.reservationNumber}
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
+                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Category</p>
+                  <p className="text-sm font-medium text-resort-charcoal-text truncate">
+                    {activeHold.rooms[0]?.roomTypeName || 'Room'}
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
+                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Check-in</p>
+                  <p className="text-sm font-medium text-resort-charcoal-text">{activeHold.checkInDate}</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-resort-sand/30">
+                  <p className="text-[10px] uppercase tracking-wider text-resort-muted mb-1">Total Payable</p>
+                  <p className="text-sm font-bold text-resort-forest">
+                    {formatCurrency(activeHold.requiredAdvanceAmount)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                {!isExpired && checkoutUrl ? (
+                  <button
+                    onClick={() => router.push(checkoutUrl)}
+                    className="w-full sm:w-auto px-10 py-4 bg-emerald-600 text-white font-semibold rounded-full hover:bg-emerald-700 transition-all text-sm shadow-md flex items-center justify-center gap-2"
+                  >
+                    <Lock className="h-4 w-4" /> Complete Online Payment ({formatCurrency(activeHold.requiredAdvanceAmount)})
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-resort-forest text-white font-semibold rounded-full hover:bg-resort-forest-light transition-all text-sm"
+                  >
+                    Start New Booking
+                  </button>
+                )}
               </div>
             </div>
           </ScrollReveal>
@@ -449,6 +692,49 @@ function BookingForm() {
                   </div>
                 </div>
 
+                {/* Payment Method Selection & Checkout Details */}
+                <div className="pt-4 border-t border-resort-sand/60 space-y-4">
+                  <PaymentMethodSelector
+                    paymentMethod={paymentMethod}
+                    onSelectMethod={(method) => setPaymentMethod(method)}
+                    allowPayAtHotel={allowPayAtHotel}
+                    disabled={isPending}
+                  />
+
+                  {paymentMethod === 'PAY_ONLINE' && (
+                    <div className="space-y-3 pt-1">
+                      <PaymentChannelTabs
+                        selectedChannel={onlineSubMethod}
+                        onSelectChannel={(ch) => setOnlineSubMethod(ch)}
+                        disabled={isPending}
+                      />
+
+                      {onlineSubMethod === 'CARD' && (
+                        <CardPaymentForm amountDueFormatted={formattedTotalPayable} />
+                      )}
+
+                      {onlineSubMethod === 'UPI' && (
+                        <UpiPaymentPanel amountDueFormatted={formattedTotalPayable} />
+                      )}
+
+                      {onlineSubMethod === 'NET_BANKING' && (
+                        <NetBankingPanel amountDueFormatted={formattedTotalPayable} />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Authoritative pricing breakdown preview */}
+                  <PaymentSummaryBreakdown
+                    roomName={selectedRoom?.name || ''}
+                    nights={nightsCount}
+                    roomsCount={Number(roomsCount) || 1}
+                    basePricePerNight={Number(selectedRoom?.basePrice) || 0}
+                    paymentMethod={paymentMethod}
+                  />
+
+                  <PaymentSecurityTrust />
+                </div>
+
                 {/* Special Requests */}
                 <div>
                   <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-resort-muted mb-2">
@@ -467,16 +753,33 @@ function BookingForm() {
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  disabled={isPending || availableTypes.length === 0}
+                  disabled={isPending || isRedirecting || availableTypes.length === 0}
+                  suppressHydrationWarning
                   className="w-full sm:w-auto px-10 py-4 bg-resort-gold text-resort-charcoal-text font-semibold rounded-full hover:bg-resort-gold-light transition-all duration-300 hover:shadow-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {isPending ? (
+                  {isRedirecting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Connecting to Secure Payment...
+                    </>
+                  ) : isPending ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" /> Securing Inventory Hold...
                     </>
+                  ) : paymentMethod === 'PAY_AT_HOTEL' ? (
+                    <>
+                      <Check className="h-4 w-4" /> Confirm Booking (Pay at Hotel)
+                    </>
+                  ) : onlineSubMethod === 'CARD' ? (
+                    <>
+                      <Lock className="h-4 w-4" /> Continue Secure Card Payment
+                    </>
+                  ) : onlineSubMethod === 'UPI' ? (
+                    <>
+                      <Lock className="h-4 w-4" /> Continue to UPI Payment
+                    </>
                   ) : (
                     <>
-                      <Lock className="h-4 w-4" /> Hold Room & Proceed to Payment
+                      <Lock className="h-4 w-4" /> Continue to Net Banking
                     </>
                   )}
                 </button>
