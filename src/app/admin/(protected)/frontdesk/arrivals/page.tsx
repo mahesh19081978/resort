@@ -82,7 +82,7 @@ export default async function ArrivalsPage() {
                             {res.status}
                           </span>
                         </td>
-                        <td className="p-3 font-mono">INR {res.advancePaidAmount.toString()}</td>
+                        <td className="p-3 font-mono">INR {res.calculatedAdvancePaid.toString()}</td>
                         <td className="p-3 text-right">
                           <Link href={'/admin/frontdesk/checkin/' + res.id}>
                             <Button size="sm" className="bg-resort-gold hover:bg-resort-sand text-white h-7 text-xs">

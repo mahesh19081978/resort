@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { PhysicalRoomStatus, StayStatus, RoomAssignmentStatus, FolioStatus, FolioItemType } from '@prisma/client';
 import { recordAuditEvent } from '@/lib/auth/audit';
 
@@ -32,12 +32,31 @@ export interface CheckInResult {
   guestName: string;
 }
 
+export type CheckInDatabaseClient = PrismaClient | Prisma.TransactionClient;
+
+function hasTransaction(client: CheckInDatabaseClient): client is PrismaClient {
+  return '$transaction' in client && typeof (client as PrismaClient).$transaction === 'function';
+}
+
 export async function executeCheckIn(
   params: ExecuteCheckInParams,
   actor: { id: string; name?: string; role: string },
-  db: Prisma.TransactionClient | typeof prisma = prisma
+  db: CheckInDatabaseClient = prisma
 ): Promise<CheckInResult> {
   const runner = async (tx: Prisma.TransactionClient): Promise<CheckInResult> => {
+    // ----------------------------------------------------
+    // 1. DETERMINISTIC ROW LOCKING
+    // Lock Order: 1. Reservation -> 2. Physical Room
+    // Both resources are locked using SELECT ... FOR UPDATE to eliminate concurrency races and deadlocks.
+    // ----------------------------------------------------
+    if ('$queryRaw' in tx && typeof tx.$queryRaw === 'function') {
+      await tx.$queryRaw`SELECT id FROM "Reservation" WHERE id = ${params.reservationId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Room" WHERE id = ${params.roomId} FOR UPDATE`;
+    }
+
+    // ----------------------------------------------------
+    // 2. AUTHORITATIVE RESERVATION REVALIDATION
+    // ----------------------------------------------------
     const reservation = await tx.reservation.findUnique({
       where: { id: params.reservationId },
       include: {
@@ -65,6 +84,14 @@ export async function executeCheckIn(
       throw new Error('RESERVATION_NOT_ELIGIBLE: This reservation has already been completed.');
     }
 
+    if (reservation.status === 'EXPIRED') {
+      throw new Error('RESERVATION_NOT_ELIGIBLE: Cannot check in an expired reservation.');
+    }
+
+    if (reservation.status === 'NO_SHOW') {
+      throw new Error('RESERVATION_NOT_ELIGIBLE: Cannot check in a no-show reservation.');
+    }
+
     if (reservation.stays.length > 0) {
       throw new Error('RESERVATION_ALREADY_CHECKED_IN: An active stay already exists for this reservation.');
     }
@@ -79,6 +106,9 @@ export async function executeCheckIn(
     // The client-provided expectedCheckOut is IGNORED — the reservation is the source of truth
     const expectedCheckoutDate = reservation.checkOutDate;
 
+    // ----------------------------------------------------
+    // 3. PHYSICAL ROOM REVALIDATION & AVAILABILITY CHECK
+    // ----------------------------------------------------
     const room = await tx.room.findUnique({
       where: { id: params.roomId },
       include: {
@@ -126,21 +156,13 @@ export async function executeCheckIn(
     // A RESERVED room must NOT be selectable merely because it is RESERVED.
     // It is ONLY valid if preassigned/reserved for this reservation.
     if (room.status === PhysicalRoomStatus.RESERVED) {
-      // Check if room is linked to this reservation via previous assignment or notes
-      const reservationStays = await tx.stay.findMany({
-        where: { reservationId: reservation.id },
-        select: { id: true },
-      });
-      const reservationStayIds = reservationStays.map((s) => s.id);
-
       const isAssignedToThisRes = await tx.roomAssignment.findFirst({
         where: {
           roomId: room.id,
-          stayId: { in: reservationStayIds },
+          stay: { reservationId: reservation.id },
         },
       });
 
-      // If no assignment link found, check if notes or reference explicitly reserves it for this reservation
       const belongsToThisReservation = !!isAssignedToThisRes || (room.notes && room.notes.includes(reservation.id));
 
       if (!belongsToThisReservation) {
@@ -150,14 +172,34 @@ export async function executeCheckIn(
       }
     }
 
-    if (params.idDocumentNumber) {
-      await tx.guestDocument.create({
+    // ----------------------------------------------------
+    // 4. MEDIA REFERENCES INTEGRITY VALIDATION
+    // Verifies pre-uploaded documents/photos belong to the primary guest.
+    // No binary blob data is written inside this transaction.
+    // ----------------------------------------------------
+    if (params.documentStorageRef) {
+      const existingDoc = await tx.guestDocument.findFirst({
+        where: {
+          guestId: reservation.primaryGuestId,
+          fileUrl: params.documentStorageRef,
+        },
+      });
+
+      if (!existingDoc || existingDoc.verificationStatus !== 'VERIFIED') {
+        throw new Error(
+          'INVALID_DOCUMENT_REFERENCE: The referenced guest document does not exist, is not verified, or does not belong to the guest.'
+        );
+      }
+    } else if (params.idDocumentNumber && (tx as any).guestDocument?.create) {
+      // Test mock or direct API path without prior wizard upload stage:
+      // Persist document metadata strictly without binary/blob payloads.
+      await (tx as any).guestDocument.create({
         data: {
           guestId: reservation.primaryGuestId,
           documentType: params.idDocumentType as any,
           documentNumber: params.idDocumentNumber,
-          fileUrl: params.documentStorageRef || ('ref:internal-doc:' + Date.now()),
-          fileDataBase64: params.documentDataBase64 || null,
+          fileUrl: 'ref:internal-doc:' + Date.now(),
+          fileDataBase64: null,
           fileName: params.documentFileName || (params.idDocumentType + '_doc.pdf'),
           mimeType: params.documentMimeType || 'application/pdf',
           fileSize: params.documentFileSize || null,
@@ -170,18 +212,23 @@ export async function executeCheckIn(
     }
 
     if (params.photoStorageRef) {
-      await tx.guestPhoto.create({
-        data: {
+      const existingPhoto = await tx.guestPhoto.findFirst({
+        where: {
           guestId: reservation.primaryGuestId,
           fileUrl: params.photoStorageRef,
-          fileDataBase64: params.photoDataBase64 || null,
-          mimeType: params.photoMimeType || 'image/jpeg',
-          capturedById: actor.id,
-          capturedAt: new Date(),
         },
       });
+
+      if (!existingPhoto) {
+        throw new Error(
+          'INVALID_PHOTO_REFERENCE: The referenced guest photo does not exist or does not belong to the guest.'
+        );
+      }
     }
 
+    // ----------------------------------------------------
+    // 5. ATOMIC STAY & ROOM ASSIGNMENT CREATION
+    // ----------------------------------------------------
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -225,6 +272,7 @@ export async function executeCheckIn(
       },
     });
 
+    // Only transition PENDING to CONFIRMED. If already CONFIRMED, preserve state without redundant query.
     if (reservation.status === 'PENDING') {
       await tx.reservation.update({
         where: { id: reservation.id },
@@ -232,7 +280,12 @@ export async function executeCheckIn(
       });
     }
 
-    // Handle Advance Deposit Collection during check-in if provided
+    // ----------------------------------------------------
+    // 6. FINANCIAL MUTATIONS: ADVANCE DEPOSIT & FOLIO LINKAGE
+    // Existing online advance payments remain authoritative.
+    // ----------------------------------------------------
+    let totalAdvancePaid = reservation.advancePaidAmount || new Prisma.Decimal(0);
+
     if (params.advanceDepositAmount && params.advanceDepositAmount > 0) {
       const depositAmount = new Prisma.Decimal(params.advanceDepositAmount.toFixed(2));
       const payRandSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -258,35 +311,64 @@ export async function executeCheckIn(
           advancePaidAmount: reservation.advancePaidAmount.plus(depositAmount),
         },
       });
+
+      totalAdvancePaid = totalAdvancePaid.plus(depositAmount);
     }
 
+    // ----------------------------------------------------
+    // 7. PRIMARY FOLIO & OPENING ROOM CHARGE
+    // ----------------------------------------------------
     const resRoom = reservation.reservedRooms[0];
-    const initialCharge = resRoom.lineTotal || resRoom.ratePerNight;
+    const grossCharge = resRoom.lineTotal || resRoom.ratePerNight;
+    const roomTaxAmount = resRoom.taxAmount || new Prisma.Decimal(0);
+    const netRoomBase = grossCharge.minus(roomTaxAmount);
+    const openingBalance = grossCharge.minus(totalAdvancePaid);
 
     const folio = await tx.folio.create({
       data: {
         folioNumber,
         stayId: stay.id,
         status: FolioStatus.OPEN,
-        totalCharges: initialCharge,
-        totalCredits: new Prisma.Decimal(0),
-        totalBalance: initialCharge,
+        totalCharges: grossCharge,
+        totalCredits: totalAdvancePaid,
+        totalBalance: openingBalance,
       },
     });
 
+    // Link authoritative reservation advance payment(s) to this new primary Folio
+    // This allows the checkout ledger to recognize existing advance payments without creating duplicate payments.
+    if ('payment' in tx && typeof (tx as any).payment?.updateMany === 'function') {
+      await (tx as any).payment.updateMany({
+        where: {
+          reservationId: reservation.id,
+          status: 'SUCCESS',
+          context: 'RESERVATION_ADVANCE',
+          folioId: null,
+        },
+        data: {
+          folioId: folio.id,
+        },
+      });
+    }
+
+    // FolioItem semantic: amount = unitPrice * quantity + taxAmount (always gross)
+    // unitPrice stores the net per-unit base; taxAmount stores the line tax.
     await tx.folioItem.create({
       data: {
         folioId: folio.id,
         itemType: FolioItemType.ROOM_CHARGE,
         description: 'Accommodation Charge: ' + reservedRoomType.name + ' (Stay ' + stayNumber + ')',
         quantity: 1,
-        unitPrice: initialCharge,
-        taxAmount: resRoom.taxAmount || new Prisma.Decimal(0),
-        amount: initialCharge,
+        unitPrice: netRoomBase,
+        taxAmount: roomTaxAmount,
+        amount: grossCharge,
         postedAt: now,
       },
     });
 
+    // ----------------------------------------------------
+    // 8. ATOMIC AUDIT LOGGING
+    // ----------------------------------------------------
     await recordAuditEvent(
       {
         userId: actor.id,
@@ -315,8 +397,15 @@ export async function executeCheckIn(
     };
   };
 
-  if ('$transaction' in db && typeof (db as any).$transaction === 'function') {
-    return await (db as typeof prisma).$transaction(runner);
+  // ----------------------------------------------------
+  // 9. TRANSACTION EXECUTION WITH PRODUCTION TIMEOUT
+  // timeout: 30000 ms, maxWait: 10000 ms
+  // ----------------------------------------------------
+  if (hasTransaction(db)) {
+    return await db.$transaction(runner, {
+      timeout: 30000,
+      maxWait: 10000,
+    });
   }
-  return await runner(db as Prisma.TransactionClient);
+  return await runner(db);
 }

@@ -77,7 +77,25 @@ export type Permission =
   | 'reports:financial'
   | 'reports:operational'
   | 'content:manage'
-  | 'audit:read';
+  | 'audit:read'
+  // Settings & Global Financial Configuration
+  | 'settings:view'
+  | 'settings:property:update'
+  | 'settings:tax:view'
+  | 'settings:tax:update'
+  | 'settings:charges:view'
+  | 'settings:charges:update'
+  | 'settings:cancellation:view'
+  | 'settings:cancellation:update'
+  | 'settings:restaurant:update'
+  | 'settings:invoice:view'
+  | 'settings:invoice:update'
+  // Frontdesk Extra Charges, Payments, Notes, Invoices
+  | 'folio:payment:record'
+  | 'folio:charge:post'
+  | 'stay:note:view'
+  | 'stay:note:create'
+  | 'invoice:issue';
 
 export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [
@@ -97,6 +115,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'procurement:bill:process', 'vendor:manage',
     'user:manage', 'role:manage', 'reports:financial', 'reports:operational',
     'content:manage', 'audit:read',
+    'settings:view', 'settings:property:update', 'settings:tax:view', 'settings:tax:update',
+    'settings:charges:view', 'settings:charges:update', 'settings:cancellation:view', 'settings:cancellation:update',
+    'settings:restaurant:update', 'settings:invoice:view', 'settings:invoice:update',
+    'folio:payment:record', 'folio:charge:post', 'stay:note:view', 'stay:note:create', 'invoice:issue',
   ],
   ADMIN: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
@@ -114,12 +136,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
     'reports:financial', 'reports:operational', 'content:manage', 'audit:read',
+    'settings:view', 'settings:property:update', 'settings:tax:view',
+    'settings:charges:view', 'settings:cancellation:view',
+    'settings:restaurant:update', 'settings:invoice:view',
+    'folio:payment:record', 'folio:charge:post', 'stay:note:view', 'stay:note:create', 'invoice:issue',
   ],
   RECEPTIONIST: [
     'booking:read', 'booking:create', 'booking:update', 'booking:cancel',
     'checkin:perform', 'checkout:perform', 'folio:read', 'folio:update', 'folio:settle',
     'room:read', 'guest:read', 'guest:manage',
     'restaurant:order:read', 'restaurant:order:create', 'restaurant:room-charge',
+    'folio:payment:record', 'folio:charge:post', 'stay:note:view', 'stay:note:create', 'invoice:issue',
   ],
   RESTAURANT_MANAGER: [
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',

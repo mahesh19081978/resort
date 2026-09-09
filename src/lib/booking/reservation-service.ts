@@ -1,10 +1,15 @@
 import { prisma } from '@/lib/db/prisma';
 import { Prisma, ReservationStatus, BookingSource, PaymentStatus, PaymentContext, RefundStatus } from '@prisma/client';
 import { getAvailableRoomTypes } from '@/lib/availability/service';
-import { calculateNights, calculateReservationPricing, roundCurrency } from './pricing-calculator';
+import { calculateBookingPrice } from './pricing-calculator';
 import { generateBookingNumber, generateRefundIdempotencyKey } from './numbers';
 import { CreateBookingRequestInput, GatewayWebhookInput } from './schema';
 import { recordAuditEvent } from '@/lib/auth/audit';
+import {
+  resolveCancellationPolicy,
+  snapshotCancellationPolicy,
+  CancellationPolicySnapshot,
+} from './cancellation-service';
 
 export interface SanitizedPublicBooking {
   reservationId: string;
@@ -297,28 +302,16 @@ async function executeHoldCreation(
   }
 
   // 8. Authoritative 9-Step Pricing Pipeline
-  // Fetch active Tax rate for room accommodation from DB
-  const taxRecord = await tx.tax.findFirst({
-    where: { code: 'ROOM_GST', isActive: true },
-  });
-  const taxRate = taxRecord ? taxRecord.rate : new Prisma.Decimal(12.0); // Configured tax rate from DB
-
-  const nights = calculateNights(input.checkInDate, input.checkOutDate);
-  const pricingItems = input.rooms.map((item) => {
-    const rt = roomTypes.find((r) => r.id === item.roomTypeId)!;
-    return {
-      roomTypeId: item.roomTypeId,
-      roomsCount: item.roomsCount,
-      basePrice: rt.basePrice,
-      nights,
-    };
-  });
-
-  const pricing = calculateReservationPricing({
-    items: pricingItems,
-    taxRatePercent: taxRate,
-    depositRatio: 1.0, // 100% advance deposit requirement
-  });
+  // Delegates to canonical calculateBookingPrice() which queries active Tax from DB and enforces pure Decimal Banker's Rounding
+  const pricing = await calculateBookingPrice(
+    {
+      checkInDate: input.checkInDate,
+      checkOutDate: input.checkOutDate,
+      rooms: input.rooms,
+      depositRatio: 1.0, // 100% advance deposit requirement
+    },
+    tx
+  );
 
   // 9. Generate Collision-Resistant Reservation Number (RES-YYYYMMDD-XXXXXX)
   const reservationNumber = generateBookingNumber('RES');
@@ -487,6 +480,16 @@ async function executeWebhookProcessing(
       },
     });
 
+    // Snapshot cancellation policy for all reservation rooms at confirmation time
+    const reservedRooms = await tx.reservationRoom.findMany({
+      where: { reservationId: reservation.id },
+    });
+
+    for (const room of reservedRooms) {
+      const policy = await resolveCancellationPolicy(room.ratePlanId, tx);
+      await snapshotCancellationPolicy(room.id, policy, tx);
+    }
+
     await recordAuditEvent(
       {
         action: 'RESERVATION_CONFIRMED_VIA_PAYMENT',
@@ -496,6 +499,7 @@ async function executeWebhookProcessing(
           reservationNumber: reservation.reservationNumber,
           paymentNumber: payment.paymentNumber,
           amount: Number(capturedAmount),
+          cancellationPolicySnapshots: reservedRooms.length,
         },
       },
       tx

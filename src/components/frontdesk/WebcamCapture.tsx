@@ -14,6 +14,9 @@ export function WebcamCapture({ onCapture, capturedImage, autoStart = false }: W
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const startingRef = useRef(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(capturedImage || null);
@@ -22,21 +25,53 @@ export function WebcamCapture({ onCapture, capturedImage, autoStart = false }: W
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        if (track.readyState === 'live') {
+          track.stop();
+        }
+      });
       streamRef.current = null;
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setIsStreaming(false);
+    if (mountedRef.current) {
+      setIsStreaming(false);
+    }
   }, []);
 
   const startCamera = useCallback(async () => {
-    setError(null);
+    if (startingRef.current) return;
+    startingRef.current = true;
+
+    if (mountedRef.current) {
+      setError(null);
+    }
+
+    // Cancel any previous in-flight getUserMedia
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Stop any existing tracks before starting new ones
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        if (track.readyState === 'live') {
+          track.stop();
+        }
+      });
+      streamRef.current = null;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraPermissionState('unavailable');
-        setError('Camera is not supported in this browser. Please try a different browser.');
+        if (mountedRef.current) {
+          setCameraPermissionState('unavailable');
+          setError('Camera is not supported in this browser. Please try a different browser.');
+        }
         return;
       }
 
@@ -44,16 +79,52 @@ export function WebcamCapture({ onCapture, capturedImage, autoStart = false }: W
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
       });
 
-      streamRef.current = stream;
-      setCameraPermissionState('granted');
+      // Check if component was unmounted or aborted during getUserMedia
+      if (controller.signal.aborted || !mountedRef.current) {
+        // User navigated away or component unmounted — stop tracks silently
+        stream.getTracks().forEach((track) => {
+          if (track.readyState === 'live') {
+            track.stop();
+          }
+        });
+        return;
+      }
 
-      if (videoRef.current) {
+      streamRef.current = stream;
+      if (mountedRef.current) {
+        setCameraPermissionState('granted');
+      }
+
+      if (videoRef.current && mountedRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setIsStreaming(true);
+        try {
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          // AbortError means the user navigated away or component unmounted during play()
+          // This is expected lifecycle behavior, not an error
+          if (playErr.name === 'AbortError') {
+            stream.getTracks().forEach((track) => {
+              if (track.readyState === 'live') {
+                track.stop();
+              }
+            });
+            streamRef.current = null;
+            return;
+          }
+          // NotReadableError or other play errors
+          if (mountedRef.current) {
+            setError('Unable to start camera preview. Please try again.');
+          }
+          return;
+        }
+        if (mountedRef.current) {
+          setIsStreaming(true);
+        }
       }
     } catch (err: any) {
-      console.error('Camera error:', err);
+      if (controller.signal.aborted || !mountedRef.current) {
+        return;
+      }
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setCameraPermissionState('denied');
         setError('Camera permission denied. Please allow camera access in your browser settings and try again.');
@@ -62,9 +133,13 @@ export function WebcamCapture({ onCapture, capturedImage, autoStart = false }: W
         setError('No camera device found. Please connect a camera and try again.');
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
         setError('Camera is already in use by another application. Please close other camera apps and try again.');
+      } else if (err.name === 'AbortError') {
+        // Silently ignore — component unmounted or new start requested
       } else {
         setError('Unable to access camera. Please check your browser settings.');
       }
+    } finally {
+      startingRef.current = false;
     }
   }, []);
 
@@ -96,19 +171,20 @@ export function WebcamCapture({ onCapture, capturedImage, autoStart = false }: W
   }, [startCamera]);
 
   useEffect(() => {
+    mountedRef.current = true;
     if (autoStart && !capturedImage && !preview) {
       startCamera();
     }
     return () => {
+      mountedRef.current = false;
+      // Cancel any in-flight getUserMedia
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       stopCamera();
     };
-  }, [autoStart, capturedImage, preview, startCamera, stopCamera]);
-
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, [stopCamera]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-4">

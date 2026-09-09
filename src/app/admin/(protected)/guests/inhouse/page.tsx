@@ -1,0 +1,37 @@
+import { requirePermission } from '@/lib/auth/auth';
+import { InHouseClient } from '@/components/guest-db/InHouseClient';
+import { BedDouble } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
+
+export const dynamic = 'force-dynamic';
+
+export default async function InHousePage() {
+  await requirePermission('guest:read');
+
+  return (
+    <div>
+      <Link
+        href="/admin/guests"
+        className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-resort-forest mb-4"
+      >
+        <ArrowLeft className="h-3 w-3" />
+        Back to Guest Database
+      </Link>
+
+      <div className="mb-6">
+        <h1 className="font-serif text-2xl font-bold text-resort-charcoal flex items-center gap-2">
+          <BedDouble className="h-6 w-6 text-resort-forest" />
+          Currently Staying
+        </h1>
+        <p className="text-sm text-neutral-500 mt-1">
+          Active in-house guests with folio balances and quick actions
+        </p>
+      </div>
+
+      <div className="border-b border-resort-sand/60 mb-6" />
+
+      <InHouseClient />
+    </div>
+  );
+}

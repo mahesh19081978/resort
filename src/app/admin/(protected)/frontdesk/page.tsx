@@ -12,7 +12,9 @@ import {
   Building2,
   ArrowRight,
 } from 'lucide-react';
-import { getExpectedArrivalsCount, getBusinessDateNow } from '@/lib/frontdesk/arrivals';
+import { getFrontDeskMetrics } from '@/lib/dashboard/frontdesk';
+import { getRoomInventorySummary } from '@/lib/dashboard/rooms';
+import { getBusinessDateNow } from '@/lib/dashboard/date';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,36 +22,20 @@ export default async function FrontDeskDashboardPage() {
   await requirePermission('booking:read');
 
   const businessDate = getBusinessDateNow();
-  const dayStart = new Date(`${businessDate}T00:00:00.000Z`);
-  const dayEnd = new Date(`${businessDate}T00:00:00.000Z`);
-  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
 
-  const [
-    arrivalsToday,
-    departuresToday,
-    inHouseStays,
-    availableRooms,
-    occupiedRooms,
-    dirtyRooms,
-    cleaningRooms,
-    maintenanceRooms,
-  ] = await Promise.all([
-    getExpectedArrivalsCount(businessDate),
-    prisma.stay.count({
-      where: {
-        status: StayStatus.ACTIVE,
-        expectedCheckOut: { gte: dayStart, lt: dayEnd },
-      },
-    }),
-    prisma.stay.count({
-      where: { status: StayStatus.ACTIVE },
-    }),
-    prisma.room.count({ where: { status: PhysicalRoomStatus.AVAILABLE, isActive: true } }),
-    prisma.room.count({ where: { status: PhysicalRoomStatus.OCCUPIED, isActive: true } }),
-    prisma.room.count({ where: { status: PhysicalRoomStatus.DIRTY, isActive: true } }),
-    prisma.room.count({ where: { status: PhysicalRoomStatus.CLEANING, isActive: true } }),
-    prisma.room.count({ where: { status: PhysicalRoomStatus.MAINTENANCE, isActive: true } }),
+  const [frontdesk, roomSummary] = await Promise.all([
+    getFrontDeskMetrics(businessDate),
+    getRoomInventorySummary(),
   ]);
+
+  const arrivalsToday = frontdesk.expectedArrivalsToday;
+  const departuresToday = frontdesk.expectedDeparturesToday;
+  const inHouseStays = frontdesk.inHouseStays;
+  const availableRooms = roomSummary.available;
+  const occupiedRooms = roomSummary.occupied;
+  const dirtyRooms = roomSummary.dirty;
+  const cleaningRooms = roomSummary.cleaning;
+  const maintenanceRooms = roomSummary.maintenance + roomSummary.outOfOrder;
 
   return (
     <div className="space-y-6">
@@ -125,7 +111,7 @@ export default async function FrontDeskDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <Link href="/admin/frontdesk/departures" className="text-xs text-rose-600 hover:underline flex items-center mt-1">
+            <Link href="/admin/frontdesk/departures?filter=today" className="text-xs text-rose-600 hover:underline flex items-center mt-1">
               View departures <ArrowRight className="w-3 h-3 ml-1" />
             </Link>
           </CardContent>

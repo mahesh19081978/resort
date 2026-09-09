@@ -8,6 +8,7 @@ import {
   BedDouble,
   Building,
   UserCheck,
+  Users,
   Receipt,
   UtensilsCrossed,
   Boxes,
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { href: '/admin/rooms', label: 'Rooms & PMS', icon: BedDouble },
   { href: '/admin/property', label: 'Property & Buildings', icon: Building },
   { href: '/admin/frontdesk', label: 'Front Desk / Check-In', icon: UserCheck },
+  { href: '/admin/guests', label: 'Guest Database', icon: Users },
   { href: '/admin/folios', label: 'Guest Folios', icon: Receipt },
   { href: '/admin/restaurant', label: 'Restaurant POS & KOT', icon: UtensilsCrossed },
   { href: '/admin/inventory', label: 'Inventory & Store', icon: Boxes },
@@ -57,7 +59,7 @@ export function AdminSidebar() {
       <nav className="p-4 space-y-1 flex-1">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
           return (
             <Link
               key={item.href}

@@ -1,13 +1,18 @@
 import { prisma } from '@/lib/db/prisma';
+import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Boxes, Warehouse, ArrowLeftRight, ClipboardCheck, AlertTriangle, TrendingDown } from 'lucide-react';
 import Link from 'next/link';
+import { getInventoryMetrics } from '@/lib/dashboard/inventory';
 
 export const dynamic = 'force-dynamic';
 
 export default async function InventoryDashboardPage() {
-  const [stores, itemsCount, lowStockCount, movementsCount, pendingTransfers, recentMovements] = await Promise.all([
+  await requirePermission('inventory:read');
+
+  const [invMetrics, stores, movementsCount, recentMovements] = await Promise.all([
+    getInventoryMetrics(),
     prisma.store.findMany({
       where: { isActive: true },
       include: {
@@ -21,20 +26,7 @@ export default async function InventoryDashboardPage() {
       },
       orderBy: { name: 'asc' },
     }),
-    prisma.inventoryItem.count({ where: { isActive: true } }),
-    prisma.stock.count({
-      where: {
-        quantityOnHand: {
-          lte: 10,
-        },
-      },
-    }),
     prisma.stockMovement.count(),
-    prisma.stockTransfer.count({
-      where: {
-        status: { in: ['PENDING_DISPATCH', 'IN_TRANSIT'] },
-      },
-    }),
     prisma.stockMovement.findMany({
       take: 10,
       orderBy: { createdAt: 'desc' },
@@ -44,6 +36,10 @@ export default async function InventoryDashboardPage() {
       },
     }),
   ]);
+
+  const itemsCount = invMetrics.totalItems;
+  const lowStockCount = invMetrics.lowStockCount;
+  const pendingTransfers = invMetrics.pendingTransfers;
 
   return (
     <div className="space-y-6">

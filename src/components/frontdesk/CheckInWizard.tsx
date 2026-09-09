@@ -394,12 +394,10 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
     formData.append('idDocumentType', idDocumentType);
     formData.append('idDocumentNumber', idDocumentNumber);
     if (documentStorageRef) formData.append('documentStorageRef', documentStorageRef);
-    if (documentDataBase64) formData.append('documentDataBase64', documentDataBase64);
     if (documentFileName) formData.append('documentFileName', documentFileName);
     if (documentMimeType) formData.append('documentMimeType', documentMimeType);
     if (documentFileSize) formData.append('documentFileSize', documentFileSize.toString());
     if (photoStorageRef) formData.append('photoStorageRef', photoStorageRef);
-    if (photoDataBase64) formData.append('photoDataBase64', photoDataBase64);
     if (photoMimeType) formData.append('photoMimeType', photoMimeType);
     if (notes) formData.append('notes', notes);
 
@@ -421,7 +419,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
   };
 
   const canAdvanceFromStage3 = idDocumentNumber.trim().length >= 3 && documentStorageRef !== '' && documentVerificationStatus === 'VERIFIED';
-  const canAdvanceFromStage4 = photoCaptured && photoStorageRef !== '';
+  const canAdvanceFromStage4 = true;
   const canAdvanceFromStage5 = selectedRoomId !== '';
 
   if (successData) {
@@ -820,6 +818,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
           <CardContent className="space-y-4">
             <p className="text-xs text-neutral-600">
               Capture a live photo of the guest for security and front-desk recognition. The camera will start automatically.
+              <span className="ml-1 text-neutral-400">(Optional — you may skip if camera is unavailable)</span>
             </p>
             <WebcamCapture
               onCapture={handlePhotoCapture}
@@ -831,14 +830,26 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
             <Button type="button" variant="outline" onClick={() => setStep(3)}>
               <ChevronLeft className="w-4 h-4 mr-1" /> Back
             </Button>
-            <Button
-              type="button"
-              disabled={!canAdvanceFromStage4}
-              onClick={() => setStep(5)}
-              className="bg-resort-charcoal text-white hover:bg-neutral-800"
-            >
-              Continue to Room Selection <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
+            <div className="flex gap-2">
+              {!photoCaptured && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setStep(5)}
+                  className="border-neutral-300 text-neutral-600"
+                >
+                  Skip Photo <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                disabled={!canAdvanceFromStage4}
+                onClick={() => setStep(5)}
+                className="bg-resort-charcoal text-white hover:bg-neutral-800"
+              >
+                {photoCaptured ? 'Continue to Room Selection' : 'Continue'} <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
           </CardFooter>
         </Card>
       )}

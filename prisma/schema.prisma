@@ -278,6 +278,39 @@ enum VendorReturnStatus {
   ACCEPTED_BY_VENDOR
   CREDITED
 }
+
+enum TaxScope {
+  ROOM
+  RESTAURANT
+  SERVICE
+  OTHER
+}
+
+enum ServiceChargeScope {
+  EXTRA_SERVICE
+  ROOM_SERVICE
+  RESTAURANT
+  ALL
+}
+
+enum ServiceChargeRateType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum NoteType {
+  OPERATIONAL
+  GUEST_PREFERENCE
+  ALERT
+  INTERNAL
+}
+
+enum CancellationFeeType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FIRST_NIGHT
+  FULL_BOOKING
+}
 // ==========================================
 // 2. ADMINISTRATION & RBAC
 // ==========================================
@@ -311,6 +344,8 @@ model User {
   approvedRequests    PurchaseRequest[] @relation("PurchaseApprover")
   issuedPOs           PurchaseOrder[]   @relation("PurchaseOrderIssuer")
   receivedGRNs        GoodsReceipt[]    @relation("GRNReceiver")
+  stayNotesCreated    StayNote[]        @relation("StayNoteCreator")
+  stayNotesUpdated    StayNote[]        @relation("StayNoteUpdater")
 
   @@index([role])
   @@index([roleEntityId])
@@ -382,6 +417,13 @@ model Property {
   country      String     @default("India")
   contactPhone String
   contactEmail String
+  website      String?
+  gstin        String?
+  logoUrl      String?
+  currency     String     @default("INR")
+  timezone     String     @default("Asia/Kolkata")
+  checkInTime  String     @default("14:00")
+  checkOutTime String     @default("12:00")
   buildings    Building[]
   rooms        Room[]
   createdAt    DateTime   @default(now())
@@ -505,25 +547,35 @@ model RoomAmenityOverride {
 // ==========================================
 
 model Tax {
-  id        String   @id @default(cuid())
-  name      String
-  code      String   @unique
-  rate      Decimal  @db.Decimal(5, 2)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String          @id @default(cuid())
+  name           String
+  code           String          @unique
+  rate           Decimal         @db.Decimal(5, 2)
+  scope          TaxScope        @default(OTHER)
+  description    String?
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+  isActive       Boolean         @default(true)
+  services       Service[]
+  serviceCharges ServiceCharge[] @relation("ServiceChargeTax")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([scope, isActive])
+  @@index([effectiveFrom, effectiveTo])
 }
 
 model RatePlan {
-  id          String     @id @default(cuid())
-  name        String
-  code        String     @unique
-  description String?
-  isActive    Boolean           @default(true)
-  roomRates   RoomRate[]
-  reservationRooms ReservationRoom[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id                   String                @id @default(cuid())
+  name                 String
+  code                 String                @unique
+  description          String?
+  isActive             Boolean               @default(true)
+  roomRates            RoomRate[]
+  reservationRooms     ReservationRoom[]
+  cancellationPolicies CancellationPolicy[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 }
 
 model RoomRate {
@@ -677,6 +729,15 @@ model ReservationRoom {
   taxAmount      Decimal     @default(0.00) @db.Decimal(12, 2)
   lineTotal      Decimal     @db.Decimal(12, 2)
 
+  cancellationPolicyId            String?
+  cancellationPolicyCode          String?
+  cancellationFeeType             CancellationFeeType?
+  cancellationFeeValue            Decimal?             @db.Decimal(10, 4)
+  cancellationMaxFeeAmount        Decimal?             @db.Decimal(12, 2)
+  cancellationMinFeeAmount        Decimal?             @db.Decimal(12, 2)
+  cancellationHoursBeforeCheckIn  Int?
+  cancellationPolicySnapshotAt    DateTime?
+
   @@index([reservationId])
   @@index([roomTypeId])
   @@index([ratePlanId])
@@ -717,6 +778,7 @@ model Stay {
   folio            Folio?
   serviceRequests  ServiceRequest[]
   restaurantOrders RestaurantOrder[]
+  stayNotes        StayNote[]
   
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -772,6 +834,9 @@ model Folio {
   items        FolioItem[]
   payments     Payment[]
   
+  invoiceNumber   String?   @unique
+  invoiceIssuedAt DateTime?
+
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
@@ -880,6 +945,10 @@ model Restaurant {
   tables      RestaurantTable[]
   menus       MenuCategory[]
   orders      RestaurantOrder[]
+  phone       String?
+  email       String?
+  openingTime String?
+  closingTime String?
   isActive    Boolean           @default(true)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
@@ -957,6 +1026,7 @@ model MenuItem {
   description  String?
   price        Decimal               @db.Decimal(10, 2)
   taxRate        Decimal               @default(5.00) @db.Decimal(5, 2)
+  taxCode        String?
   isVegetarian   Boolean               @default(true)
   isAvailable    Boolean               @default(true)
   kitchenStation String?               @default("MAIN_KITCHEN")
@@ -1658,6 +1728,8 @@ model Service {
   basePrice    Decimal          @db.Decimal(10, 2)
   isChargeable Boolean          @default(true)
   isActive     Boolean          @default(true)
+  taxId        String?
+  tax          Tax?             @relation(fields: [taxId], references: [id], onDelete: SetNull)
   requests     ServiceRequest[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -1734,4 +1806,82 @@ model Offer {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ==========================================
+// 17. PMS ENHANCEMENTS: NOTES, SETTINGS & CHARGES
+// ==========================================
+
+model StayNote {
+  id          String    @id @default(cuid())
+  stayId      String
+  stay        Stay      @relation(fields: [stayId], references: [id], onDelete: Cascade)
+  noteType    NoteType  @default(OPERATIONAL)
+  content     String
+  isEdited    Boolean   @default(false)
+  createdById String?
+  createdBy   User?     @relation("StayNoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?     @relation("StayNoteUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([stayId])
+  @@index([noteType])
+}
+
+model ServiceCharge {
+  id            String                 @id @default(cuid())
+  name          String
+  code          String                 @unique
+  description   String?
+  scope         ServiceChargeScope
+  rateType      ServiceChargeRateType  @default(PERCENTAGE)
+  rateValue     Decimal                @db.Decimal(8, 4)
+  taxable       Boolean                @default(false)
+  taxId         String?
+  tax           Tax?                   @relation("ServiceChargeTax", fields: [taxId], references: [id], onDelete: SetNull)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  isActive      Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([scope, isActive])
+}
+
+model CancellationPolicy {
+  id                 String              @id @default(cuid())
+  name               String
+  code               String              @unique
+  description        String?
+  feeType            CancellationFeeType
+  feeValue           Decimal             @db.Decimal(10, 4)
+  maxFeeAmount       Decimal?            @db.Decimal(12, 2)
+  minFeeAmount       Decimal?            @db.Decimal(12, 2)
+  hoursBeforeCheckIn Int?
+  ratePlanId         String?
+  ratePlan           RatePlan?           @relation(fields: [ratePlanId], references: [id], onDelete: SetNull)
+  isDefault          Boolean             @default(false)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([ratePlanId])
+  @@index([isDefault, isActive])
+}
+
+model InvoiceConfig {
+  id                 String   @id @default(cuid())
+  singletonKey       String   @unique @default("DEFAULT")
+  prefix             String   @default("INV")
+  yearMonth          String   @default("")
+  nextSequence       Int      @default(1)
+  termsAndConditions String?
+  footerNote         String?
+  showTaxBreakdown   Boolean  @default(true)
+  showPaymentHistory Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
 }

@@ -4,30 +4,49 @@ import { requirePermission } from '@/lib/auth/auth';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { StayStatus } from '@prisma/client';
-import { LogOut, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { LogOut, ArrowRight, CheckCircle2, Calendar, Users } from 'lucide-react';
+import { getExpectedDepartures, getExpectedDeparturesCount } from '@/lib/frontdesk/departures';
+import { getBusinessDateNow } from '@/lib/dashboard/date';
 
 export const dynamic = 'force-dynamic';
 
-export default async function DeparturesPage() {
+interface DeparturesPageProps {
+  searchParams: Promise<{
+    filter?: string;
+  }>;
+}
+
+export default async function DeparturesPage({ searchParams }: DeparturesPageProps) {
   await requirePermission('checkout:perform');
 
-  const activeStays = await prisma.stay.findMany({
-    where: { status: StayStatus.ACTIVE },
-    include: {
-      primaryGuest: true,
-      roomAssignments: {
-        where: { status: 'ACTIVE' },
-        include: { room: true },
-      },
-      folio: {
+  const params = await searchParams;
+  const isTodayOnly = params.filter === 'today';
+  const businessDate = getBusinessDateNow();
+
+  const [todayDeparturesCount, totalActiveCount] = await Promise.all([
+    getExpectedDeparturesCount(businessDate),
+    prisma.stay.count({ where: { status: StayStatus.ACTIVE } }),
+  ]);
+
+  const activeStays = isTodayOnly
+    ? await getExpectedDepartures(businessDate)
+    : await prisma.stay.findMany({
+        where: { status: StayStatus.ACTIVE },
         include: {
-          items: true,
-          payments: true,
+          primaryGuest: true,
+          roomAssignments: {
+            where: { status: 'ACTIVE' },
+            include: { room: true },
+          },
+          folio: {
+            include: {
+              items: true,
+              payments: true,
+            },
+          },
         },
-      },
-    },
-    orderBy: { expectedCheckOut: 'asc' },
-  });
+        orderBy: { expectedCheckOut: 'asc' },
+      });
 
   return (
     <div className="space-y-6">
@@ -38,24 +57,52 @@ export default async function DeparturesPage() {
             Review guest folios, settle balances, and process formal checkouts.
           </p>
         </div>
-        <Link href="/admin/frontdesk">
-          <Button variant="outline" size="sm">Back to Front Desk</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/frontdesk/departures?filter=today">
+            <Button
+              size="sm"
+              variant={isTodayOnly ? 'primary' : 'outline'}
+              className={isTodayOnly ? 'bg-resort-charcoal text-white text-xs' : 'text-xs'}
+            >
+              <Calendar className="w-3.5 h-3.5 mr-1.5" /> Today ({todayDeparturesCount})
+            </Button>
+          </Link>
+          <Link href="/admin/frontdesk/departures">
+            <Button
+              size="sm"
+              variant={!isTodayOnly ? 'primary' : 'outline'}
+              className={!isTodayOnly ? 'bg-resort-charcoal text-white text-xs' : 'text-xs'}
+            >
+              <Users className="w-3.5 h-3.5 mr-1.5" /> All Active ({totalActiveCount})
+            </Button>
+          </Link>
+          <Link href="/admin/frontdesk">
+            <Button variant="outline" size="sm" className="text-xs">Back to Front Desk</Button>
+          </Link>
+        </div>
       </div>
 
       <Card>
         <CardHeader className="p-4 border-b border-neutral-100">
           <CardTitle className="text-sm font-semibold flex items-center justify-between">
-            <span>Stays Pending Checkout ({activeStays.length})</span>
+            <span>
+              {isTodayOnly
+                ? `Today's Expected Departures (${activeStays.length})`
+                : `Stays Pending Checkout (${activeStays.length})`}
+            </span>
           </CardTitle>
           <CardDescription className="text-xs">
-            Releasing a room automatically marks its physical status as DIRTY for housekeeping turnover.
+            {isTodayOnly
+              ? `Showing guests scheduled to depart on today's business date (${businessDate}).`
+              : 'Releasing a room automatically marks its physical status as DIRTY for housekeeping turnover.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {activeStays.length === 0 ? (
             <div className="p-8 text-center text-neutral-400 text-sm">
-              No active stays pending departure.
+              {isTodayOnly
+                ? 'No guest departures scheduled for today.'
+                : 'No active stays pending departure.'}
             </div>
           ) : (
             <div className="overflow-x-auto">

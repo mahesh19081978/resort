@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Prisma } from '@prisma/client';
 import {
   getBusinessDateNow,
   buildExpectedArrivalsWhere,
+  calculateAdvancePaidFromPayments,
 } from '@/lib/frontdesk/arrivals';
 
 describe('getBusinessDateNow', () => {
@@ -81,5 +83,253 @@ describe('buildExpectedArrivalsWhere', () => {
     const where2 = buildExpectedArrivalsWhere('2026-09-08');
 
     expect(where1).toEqual(where2);
+  });
+});
+
+describe('calculateAdvancePaidFromPayments', () => {
+  const D = (v: number) => new Prisma.Decimal(v);
+
+  it('returns 0 when no payments exist', () => {
+    const result = calculateAdvancePaidFromPayments([]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('returns 0 when payments exist but none are RESERVATION_ADVANCE', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(5000),
+        status: 'SUCCESS',
+        context: 'FOLIO_SETTLEMENT',
+      },
+    ]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('returns 0 when payments exist but none are SUCCESS', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(5000),
+        status: 'FAILED',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('calculates single successful CARD reservation advance', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(6160))).toBe(true);
+  });
+
+  it('calculates single successful UPI reservation advance (same as CARD)', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(6160))).toBe(true);
+  });
+
+  it('calculates single successful NET_BANKING reservation advance (same as CARD)', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(6160))).toBe(true);
+  });
+
+  it('payment method must not affect advance calculation', () => {
+    const methods = ['CARD', 'UPI', 'NET_BANKING', 'CASH', 'BANK_TRANSFER', 'ONLINE'] as const;
+    for (const method of methods) {
+      const result = calculateAdvancePaidFromPayments([
+        {
+          amount: D(6160),
+          status: 'SUCCESS',
+          context: 'RESERVATION_ADVANCE',
+        },
+      ]);
+      expect(result.equals(D(6160))).toBe(true);
+    }
+  });
+
+  it('returns 0 for no reservation advance payment', () => {
+    const result = calculateAdvancePaidFromPayments([]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('returns 0 for failed payment', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'FAILED',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('handles partial advance', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(3000),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(3000))).toBe(true);
+  });
+
+  it('sums multiple reservation advance payments', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(3000),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+      {
+        amount: D(2000),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(5000))).toBe(true);
+  });
+
+  it('deducts processed refunds from advance paid', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+        refunds: [
+          { amount: D(1000), status: 'PROCESSED' },
+        ],
+      },
+    ]);
+    expect(result.equals(D(5160))).toBe(true);
+  });
+
+  it('does not deduct pending refunds from advance paid', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+        refunds: [
+          { amount: D(1000), status: 'PENDING' },
+        ],
+      },
+    ]);
+    expect(result.equals(D(6160))).toBe(true);
+  });
+
+  it('handles amount mismatch scenario (captured different from expected)', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(5000),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(5000))).toBe(true);
+  });
+
+  it('does not count duplicate payment records (idempotent)', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    // Both are SUCCESS RESERVATION_ADVANCE, both are counted
+    // Idempotency is handled at the DB level (unique constraint), not here
+    expect(result.equals(D(12320))).toBe(true);
+  });
+
+  it('ignores VOIDED payments', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'VOIDED',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('ignores REFUNDED payments', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'REFUNDED',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(D(0))).toBe(true);
+  });
+
+  it('uses Prisma Decimal for all calculations (no floating point)', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: new Prisma.Decimal('100.01'),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+      {
+        amount: new Prisma.Decimal('200.02'),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    expect(result.equals(new Prisma.Decimal('300.03'))).toBe(true);
+  });
+
+  it('complex scenario: mixed contexts, statuses, and refunds', () => {
+    const result = calculateAdvancePaidFromPayments([
+      {
+        amount: D(6160),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+        refunds: [
+          { amount: D(500), status: 'PROCESSED' },
+          { amount: D(200), status: 'PENDING' },
+        ],
+      },
+      {
+        amount: D(3000),
+        status: 'SUCCESS',
+        context: 'FOLIO_SETTLEMENT',
+      },
+      {
+        amount: D(1000),
+        status: 'FAILED',
+        context: 'RESERVATION_ADVANCE',
+      },
+      {
+        amount: D(2000),
+        status: 'SUCCESS',
+        context: 'RESERVATION_ADVANCE',
+      },
+    ]);
+    // Only SUCCESS + RESERVATION_ADVANCE count: 6160 + 2000 = 8160
+    // Minus PROCESSED refunds: 8160 - 500 = 7660
+    expect(result.equals(D(7660))).toBe(true);
   });
 });

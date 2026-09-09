@@ -16,39 +16,19 @@ import {
   CheckCircle2,
   Clock,
 } from 'lucide-react';
-import { TableSessionStatus, OrderStatus, BillStatus } from '@prisma/client';
+import { getRestaurantMetrics } from '@/lib/dashboard/restaurant';
 
 export const dynamic = 'force-dynamic';
 
 export default async function RestaurantDashboardPage() {
   await requirePermission('restaurant:order:read');
 
-  // Aggregate live operational restaurant metrics
-  const [
-    totalTables,
-    activeSessionsCount,
-    pendingKOTsCount,
-    activeOrdersCount,
-    todayBills,
-  ] = await Promise.all([
-    prisma.restaurantTable.count({ where: { isActive: true } }),
-    prisma.tableSession.count({ where: { status: TableSessionStatus.ACTIVE } }),
-    prisma.kOT.count({ where: { status: { in: ['SENT', 'PREPARING'] } } }),
-    prisma.restaurantOrder.count({
-      where: { status: { in: [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.SERVED] } },
-    }),
-    prisma.restaurantBill.findMany({
-      where: {
-        createdAt: {
-          gte: new Date(new Date().setHours(0, 0, 0, 0)),
-        },
-        status: { in: [BillStatus.SETTLED, BillStatus.CHARGED_TO_ROOM] },
-      },
-      select: { totalAmount: true },
-    }),
-  ]);
-
-  const todayRevenue = todayBills.reduce((s, b) => s + b.totalAmount.toNumber(), 0);
+  const metrics = await getRestaurantMetrics();
+  const totalTables = metrics.totalTables;
+  const activeSessionsCount = metrics.activeSessionsCount;
+  const pendingKOTsCount = metrics.pendingKOTsCount;
+  const activeOrdersCount = metrics.activeOrdersCount;
+  const todayRevenue = metrics.todayRestaurantSales;
 
   return (
     <div className="space-y-6">
@@ -107,11 +87,11 @@ export default async function RestaurantDashboardPage() {
         <Card className="border-resort-sand">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs text-resort-stone font-medium">Today's F&B Revenue</p>
-              <h3 className="font-serif text-2xl font-bold text-emerald-800 mt-1">
-                {formatCurrency(todayRevenue)}
+              <p className="text-xs text-resort-stone font-medium">Today's F&B Realized Sales</p>
+              <h3 className="font-serif text-2xl font-bold text-emerald-800 mt-1 font-mono">
+                INR {todayRevenue.toString()}
               </h3>
-              <p className="text-[11px] text-emerald-700 mt-1">{todayBills.length} Settled / Charged Bills</p>
+              <p className="text-[11px] text-emerald-700 mt-1">Settled & Room Charged Orders</p>
             </div>
             <div className="p-3 rounded-full bg-emerald-50 text-emerald-700">
               <Receipt className="w-5 h-5" />

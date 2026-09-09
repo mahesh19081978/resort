@@ -323,6 +323,11 @@ async function main() {
     update: {},
     create: { name: 'Restaurant F&B GST', code: 'GST_FNB_5', rate: 5.00 },
   });
+  await prisma.tax.upsert({
+    where: { code: 'GST_SVC_18' },
+    update: {},
+    create: { name: 'General Service Tax', code: 'GST_SVC_18', rate: 18.00 },
+  });
 
   const rpEP = await prisma.ratePlan.upsert({
     where: { code: 'EP' },

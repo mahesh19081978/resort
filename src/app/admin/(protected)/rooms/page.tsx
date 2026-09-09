@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { PhysicalRoomStatus } from '@prisma/client';
 import { updateRoomStatusAction, deleteRoomAction } from '@/actions/pms';
 import { DeleteEntityButton } from '@/components/admin';
+import { getRoomInventorySummary } from '@/lib/dashboard/rooms';
 import {
   BedDouble,
   Plus,
@@ -129,14 +130,14 @@ export default async function RoomsPage({ searchParams }: RoomsPageProps) {
       orderBy: { roomNumber: 'asc' },
     });
 
-    const allRoomsForCount = await prisma.room.findMany({
-      where: { isActive: true },
-      select: { status: true },
-    });
-
-    for (const r of allRoomsForCount) {
-      statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
-    }
+    const summary = await getRoomInventorySummary();
+    statusCounts[PhysicalRoomStatus.AVAILABLE] = summary.available;
+    statusCounts[PhysicalRoomStatus.RESERVED] = summary.reserved;
+    statusCounts[PhysicalRoomStatus.OCCUPIED] = summary.occupied;
+    statusCounts[PhysicalRoomStatus.DIRTY] = summary.dirty;
+    statusCounts[PhysicalRoomStatus.CLEANING] = summary.cleaning;
+    statusCounts[PhysicalRoomStatus.MAINTENANCE] = summary.maintenance;
+    statusCounts[PhysicalRoomStatus.OUT_OF_ORDER] = summary.outOfOrder;
   } catch (error) {
     console.warn('[RoomsPage] Database fetch failed (offline/mock):', (error as Error).message);
   }
