@@ -47,7 +47,7 @@ export async function loginAction(
 
   // 1. Rate Limiting Check
   const rateLimitKey = `${clientIp}:${normalizedEmail}`;
-  const rateLimitStatus = checkLoginRateLimit(rateLimitKey);
+  const rateLimitStatus = await checkLoginRateLimit(rateLimitKey);
   if (!rateLimitStatus.allowed) {
     await recordAuditEvent({
       action: 'LOGIN_RATE_LIMITED',
@@ -71,7 +71,7 @@ export async function loginAction(
     });
   } catch (dbError) {
     // Database unreachable or connection failed: fail closed immediately
-    recordLoginAttempt(rateLimitKey, false);
+    await recordLoginAttempt(rateLimitKey, false);
     await recordAuditEvent({
       action: 'LOGIN_SYSTEM_ERROR',
       entity: 'User',
@@ -92,7 +92,7 @@ export async function loginAction(
     // Perform dummy bcrypt comparison to neutralize response timing discrepancy between existing & nonexistent users
     await verifyPassword(password, DUMMY_BCRYPT_HASH);
 
-    recordLoginAttempt(rateLimitKey, false);
+    await recordLoginAttempt(rateLimitKey, false);
     await recordAuditEvent({
       action: 'LOGIN_FAILURE',
       entity: 'User',
@@ -111,7 +111,7 @@ export async function loginAction(
   // 4. Verify password against stored hash
   const isValidPassword = await verifyPassword(password, user.passwordHash);
   if (!isValidPassword) {
-    recordLoginAttempt(rateLimitKey, false);
+    await recordLoginAttempt(rateLimitKey, false);
     await recordAuditEvent({
       userId: user.id,
       action: 'LOGIN_FAILURE',
@@ -129,7 +129,7 @@ export async function loginAction(
   }
 
   // 5. Successful Authentication
-  recordLoginAttempt(rateLimitKey, true);
+  await recordLoginAttempt(rateLimitKey, true);
 
   try {
     await prisma.user.update({

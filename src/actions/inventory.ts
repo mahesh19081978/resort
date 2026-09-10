@@ -1,3 +1,5 @@
+'use server';
+
 import { prisma } from '@/lib/db/prisma';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { postStockMovement } from '@/lib/inventory/stock-ledger-service';

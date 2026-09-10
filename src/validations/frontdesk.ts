@@ -59,7 +59,43 @@ export const folioChargeSchema = z.object({
   folioId: z.string().cuid({ message: 'Invalid folio ID' }),
   description: z.string().trim().min(3).max(255),
   amount: z.coerce.number().positive('Charge amount must be greater than zero'),
-  taxAmount: z.coerce.number().min(0).default(0),
+  taxCode: z.string().trim().min(1).optional(),
+  idempotencyKey: z.string().trim().min(1, 'Idempotency key is required'),
+});
+
+export const postServiceChargeSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  serviceId: z.string().cuid({ message: 'Invalid service ID' }),
+  description: z.string().trim().min(1, 'Description is required').max(255),
+  quantity: z.coerce.number().int().positive('Quantity must be at least 1').default(1),
+  unitPrice: z.coerce.number().min(0).optional(),
+  notes: z.string().trim().max(500).optional(),
+  idempotencyKey: z.string().trim().min(1, 'Idempotency key is required'),
+});
+
+export const recordFolioPaymentSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  amount: z.coerce.number().positive('Payment amount must be greater than zero'),
+  method: z.nativeEnum(PaymentMethod, { message: 'Valid payment method required' }),
+  transactionReference: z.string().trim().max(100).optional().or(z.literal('')),
+  notes: z.string().trim().max(500).optional().or(z.literal('')),
+  idempotencyKey: z.string().trim().min(1, 'Idempotency key is required'),
+});
+
+export const stayNoteCreateSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  noteType: z.enum(['OPERATIONAL', 'GUEST_PREFERENCE', 'ALERT', 'INTERNAL']).default('OPERATIONAL'),
+  content: z.string().trim().min(1, 'Note content is required').max(1000),
+});
+
+export const stayNoteUpdateSchema = z.object({
+  id: z.string().cuid({ message: 'Invalid note ID' }),
+  noteType: z.enum(['OPERATIONAL', 'GUEST_PREFERENCE', 'ALERT', 'INTERNAL']).optional(),
+  content: z.string().trim().min(1, 'Note content is required').max(1000),
+});
+
+export const issueInvoiceSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
 });
 
 export type CheckInInput = z.infer<typeof checkInSchema>;
@@ -68,3 +104,8 @@ export type GuestDocumentUploadInput = z.infer<typeof guestDocumentUploadSchema>
 export type GuestDocumentVerifyInput = z.infer<typeof guestDocumentVerifySchema>;
 export type GuestPhotoUploadInput = z.infer<typeof guestPhotoUploadSchema>;
 export type FolioChargeInput = z.infer<typeof folioChargeSchema>;
+export type PostServiceChargeInput = z.infer<typeof postServiceChargeSchema>;
+export type RecordFolioPaymentInput = z.infer<typeof recordFolioPaymentSchema>;
+export type StayNoteCreateInput = z.infer<typeof stayNoteCreateSchema>;
+export type StayNoteUpdateInput = z.infer<typeof stayNoteUpdateSchema>;
+export type IssueInvoiceInput = z.infer<typeof issueInvoiceSchema>;

@@ -620,6 +620,12 @@ export async function splitRestaurantBill(
 
     const childPlans: ChildBillPlan[] = [];
 
+    // Compute parent bill's effective tax rate from historical snapshot
+    // NEVER re-query Tax config — preserve parent bill's historical tax data
+    const parentEffectiveTaxRate = parentBill.subtotal.greaterThan(0)
+      ? parentBill.taxAmount.dividedBy(parentBill.subtotal).times(100)
+      : new Prisma.Decimal(0);
+
     if (splitType === SplitType.EQUAL) {
       if (!equalParts || equalParts < 2) {
         throw new Error('Equal split requires at least 2 parts.');
@@ -660,7 +666,7 @@ export async function splitRestaurantBill(
               description: `Equal split (Part ${i + 1} of ${equalParts})`,
               quantity: 1,
               unitPrice: pSub,
-              taxRate: new Prisma.Decimal(5.0),
+              taxRate: parentEffectiveTaxRate,
               amount: pSub,
             },
           ],
@@ -714,7 +720,7 @@ export async function splitRestaurantBill(
               description: `Custom portion (Part ${i + 1} of ${customAmounts.length})`,
               quantity: 1,
               unitPrice: pSub,
-              taxRate: new Prisma.Decimal(5.0),
+              taxRate: parentEffectiveTaxRate,
               amount: pSub,
             },
           ],

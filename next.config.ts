@@ -1,5 +1,19 @@
 import type { NextConfig } from 'next';
 
+const ContentSecurityPolicy = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https://images.unsplash.com data: blob:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-src 'self' https://challenges.cloudflare.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
@@ -21,6 +35,10 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: ContentSecurityPolicy,
+          },
           {
             key: 'X-DNS-Prefetch-Control',
             value: 'on',
