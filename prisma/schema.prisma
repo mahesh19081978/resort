@@ -729,6 +729,11 @@ model ReservationRoom {
   taxAmount      Decimal     @default(0.00) @db.Decimal(12, 2)
   lineTotal      Decimal     @db.Decimal(12, 2)
 
+  taxId          String?
+  taxCode        String?
+  taxRate        Decimal?    @db.Decimal(5, 2)
+  taxSnapshotAt  DateTime?
+
   cancellationPolicyId            String?
   cancellationPolicyCode          String?
   cancellationFeeType             CancellationFeeType?

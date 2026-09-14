@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, PhysicalRoomStatus, TableStatus } from '@prisma/client';
+import { PrismaClient, UserRole, PhysicalRoomStatus, TableStatus, TaxScope } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -377,22 +377,22 @@ async function main() {
   await prisma.tax.upsert({
     where: { code: 'GST_ROOM_12' },
     update: {},
-    create: { name: 'Hospitality GST (Below ₹7,500)', code: 'GST_ROOM_12', rate: 12.00 },
+    create: { name: 'Hospitality GST (Below ₹7,500)', code: 'GST_ROOM_12', rate: 12.00, scope: TaxScope.ROOM },
   });
   await prisma.tax.upsert({
     where: { code: 'GST_ROOM_18' },
     update: {},
-    create: { name: 'Luxury Hospitality GST (₹7,500 & Above)', code: 'GST_ROOM_18', rate: 18.00 },
+    create: { name: 'Luxury Hospitality GST (₹7,500 & Above)', code: 'GST_ROOM_18', rate: 18.00, scope: TaxScope.ROOM },
   });
   await prisma.tax.upsert({
     where: { code: 'GST_FNB_5' },
     update: {},
-    create: { name: 'Restaurant F&B GST', code: 'GST_FNB_5', rate: 5.00 },
+    create: { name: 'Restaurant F&B GST', code: 'GST_FNB_5', rate: 5.00, scope: TaxScope.RESTAURANT },
   });
   await prisma.tax.upsert({
     where: { code: 'GST_SVC_18' },
     update: {},
-    create: { name: 'General Service Tax', code: 'GST_SVC_18', rate: 18.00 },
+    create: { name: 'General Service Tax', code: 'GST_SVC_18', rate: 18.00, scope: TaxScope.SERVICE },
   });
 
   const rpEP = await prisma.ratePlan.upsert({

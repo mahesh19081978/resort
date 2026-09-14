@@ -1,4 +1,6 @@
 import { Prisma } from '@prisma/client';
+import { prisma as defaultPrisma } from '@/lib/db/prisma';
+import { resolveTaxForRoom } from '@/lib/db/tax';
 
 export interface RoomLinePricingInput {
   roomTypeId: string;
@@ -25,6 +27,37 @@ export interface ReservationPricingResult {
   taxAmount: Prisma.Decimal;
   totalAmount: Prisma.Decimal;
   requiredAdvanceAmount: Prisma.Decimal;
+}
+
+export interface CalculateBookingPriceInput {
+  checkInDate: string;
+  checkOutDate: string;
+  rooms: Array<{
+    roomTypeId: string;
+    roomsCount: number;
+  }>;
+  discountAmount?: Prisma.Decimal | number;
+  depositRatio?: Prisma.Decimal | number;
+}
+
+export interface CanonicalPricingResult extends ReservationPricingResult {
+  taxId: string;
+  taxRatePercent: Prisma.Decimal;
+  taxCode: string;
+  taxName: string;
+  nights: number;
+  currency: 'INR';
+  roomDetails: Array<{
+    roomTypeId: string;
+    name: string;
+    basePrice: Prisma.Decimal;
+    roomsCount: number;
+    totalNights: number;
+    ratePerNight: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    taxAmount: Prisma.Decimal;
+    lineTotal: Prisma.Decimal;
+  }>;
 }
 
 /**
@@ -152,5 +185,99 @@ export function calculateReservationPricing(params: {
     taxAmount: totalTax,
     totalAmount,
     requiredAdvanceAmount,
+  };
+}
+
+/**
+ * Single Authoritative Canonical Server-Side Booking Pricing Engine.
+ *
+ * Enforces:
+ * 1. Strict calendar nights calculation.
+ * 2. RoomType existence and active check.
+ * 3. Authoritative scope-based Tax resolution via resolveTaxForRoom().
+ *    CRITICAL: Fails closed with an explicit error if tax configuration is missing.
+ *    NEVER falls back silently to an arbitrary number.
+ * 4. Pure Decimal arithmetic with Banker's Rounding (ROUND_HALF_EVEN) via calculateReservationPricing.
+ * 5. Single authoritative asOf timestamp used throughout to prevent boundary inconsistencies.
+ */
+export async function calculateBookingPrice(
+  input: CalculateBookingPriceInput,
+  client: Prisma.TransactionClient | typeof defaultPrisma = defaultPrisma,
+  asOf: Date = new Date()
+): Promise<CanonicalPricingResult> {
+  if (!input.checkInDate || !input.checkOutDate) {
+    throw new Error('Check-in and check-out dates are required.');
+  }
+
+  const nights = calculateNights(input.checkInDate, input.checkOutDate);
+
+  if (!input.rooms || input.rooms.length === 0) {
+    throw new Error('At least one room is required for pricing calculation.');
+  }
+
+  for (const r of input.rooms) {
+    if (!r.roomTypeId || typeof r.roomTypeId !== 'string') {
+      throw new Error('Valid roomTypeId is required for all requested rooms.');
+    }
+    if (!r.roomsCount || r.roomsCount < 1) {
+      throw new Error('Rooms count must be at least 1 for all requested rooms.');
+    }
+  }
+
+  const roomTypeIds = Array.from(new Set(input.rooms.map((r) => r.roomTypeId)));
+  const roomTypes = await client.roomType.findMany({
+    where: { id: { in: roomTypeIds }, isActive: true },
+  });
+
+  if (roomTypes.length !== roomTypeIds.length) {
+    throw new Error('One or more selected room types are invalid or inactive.');
+  }
+
+  const roomTypeMap = new Map(roomTypes.map((rt) => [rt.id, rt]));
+
+  // Authoritative Scope-Based Tax Resolution (No hardcoded tax codes!)
+  const resolvedTax = await resolveTaxForRoom(asOf, client);
+
+  const pricingItems: RoomLinePricingInput[] = input.rooms.map((item) => {
+    const rt = roomTypeMap.get(item.roomTypeId)!;
+    return {
+      roomTypeId: item.roomTypeId,
+      roomsCount: item.roomsCount,
+      basePrice: rt.basePrice,
+      nights,
+    };
+  });
+
+  const pricing = calculateReservationPricing({
+    items: pricingItems,
+    taxRatePercent: resolvedTax.taxRate,
+    depositRatio: input.depositRatio ?? 1.0,
+    discountAmount: input.discountAmount ?? 0,
+  });
+
+  const roomDetails = pricing.lines.map((l) => {
+    const rt = roomTypeMap.get(l.roomTypeId)!;
+    return {
+      roomTypeId: l.roomTypeId,
+      name: rt.name,
+      basePrice: new Prisma.Decimal(rt.basePrice),
+      roomsCount: l.roomsCount,
+      totalNights: l.totalNights,
+      ratePerNight: l.ratePerNight,
+      discountAmount: l.discountAmount,
+      taxAmount: l.taxAmount,
+      lineTotal: l.lineTotal,
+    };
+  });
+
+  return {
+    ...pricing,
+    taxId: resolvedTax.taxId,
+    taxRatePercent: resolvedTax.taxRate,
+    taxCode: resolvedTax.taxCode,
+    taxName: resolvedTax.taxName,
+    nights,
+    currency: 'INR',
+    roomDetails,
   };
 }
