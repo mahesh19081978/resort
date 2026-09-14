@@ -127,6 +127,7 @@ export async function getInHouseRooms(
         },
       },
       stayGuests: {
+        where: { isActive: true },
         select: { id: true },
       },
       folio: {
@@ -233,7 +234,7 @@ export async function getInHouseRooms(
       guestId: stay.primaryGuestId,
       guestName: `${stay.primaryGuest.firstName} ${stay.primaryGuest.lastName}`,
       guestPhone: stay.primaryGuest.phone,
-      guestCount: stay.stayGuests.length + 1,
+      guestCount: Math.max(1, stay.stayGuests.length),
       actualCheckIn: stay.actualCheckIn.toISOString(),
       expectedCheckOut: stay.expectedCheckOut.toISOString(),
       nightsElapsed,

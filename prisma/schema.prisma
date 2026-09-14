@@ -613,6 +613,7 @@ model Guest {
   postalCode         String?
   country            String?            @default("India")
   dateOfBirth        DateTime?
+  gender             String?
   nationality        String?            @default("Indian")
   vip                Boolean            @default(false)
   blacklisted        Boolean            @default(false)
@@ -795,14 +796,18 @@ model Stay {
 }
 
 model StayGuest {
-  id        String   @id @default(cuid())
-  stayId    String
-  stay      Stay     @relation(fields: [stayId], references: [id], onDelete: Cascade)
-  guestId   String
-  guest     Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  isPrimary Boolean  @default(false)
+  id            String    @id @default(cuid())
+  stayId        String
+  stay          Stay      @relation(fields: [stayId], references: [id], onDelete: Cascade)
+  guestId       String
+  guest         Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  isPrimary     Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  leftAt        DateTime?
+  removedReason String?
 
   @@unique([stayId, guestId])
+  @@index([stayId, isActive])
 }
 
 model RoomAssignment {

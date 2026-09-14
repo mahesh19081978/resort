@@ -1,14 +1,31 @@
 import { z } from 'zod';
 import { IdDocumentType, PaymentMethod } from '@prisma/client';
 
+export const occupantInputSchema = z.object({
+  id: z.string().optional(),
+  firstName: z.string().trim().min(1, 'First name is required').max(100),
+  lastName: z.string().trim().min(1, 'Last name is required').max(100),
+  gender: z.string().trim().min(1, 'Gender is required'),
+  phone: z.string().trim().max(20).optional().or(z.literal('')),
+  email: z.string().email().optional().or(z.literal('')),
+  idDocumentType: z.nativeEnum(IdDocumentType, { message: 'Valid ID document type is required' }),
+  idDocumentNumber: z.string().trim().min(3, 'Document number must be at least 3 characters').max(50),
+  documentStorageRef: z.string().trim().min(5).optional(),
+  documentFileName: z.string().trim().max(255).optional(),
+  documentMimeType: z.string().trim().max(100).optional(),
+  documentFileSize: z.coerce.number().int().positive().max(15 * 1024 * 1024).optional(),
+  isPrimary: z.boolean().default(false),
+});
+
 export const checkInSchema = z.object({
   reservationId: z.string().cuid({ message: 'Invalid reservation ID' }),
   roomId: z.string().cuid({ message: 'Invalid physical room ID' }),
   expectedCheckOut: z.string().refine((val) => !isNaN(Date.parse(val)), {
     message: 'Valid expected checkout date is required',
   }),
-  idDocumentType: z.nativeEnum(IdDocumentType, { message: 'Valid ID document type is required' }),
-  idDocumentNumber: z.string().trim().min(3, 'Document number must be at least 3 characters').max(50),
+  idDocumentType: z.nativeEnum(IdDocumentType, { message: 'Valid ID document type is required' }).optional(),
+  idDocumentNumber: z.string().trim().min(3, 'Document number must be at least 3 characters').max(50).optional(),
+  gender: z.string().trim().optional(),
   documentStorageRef: z.string().trim().min(5, 'Valid document storage reference is required').optional(),
   documentFileName: z.string().trim().max(255).optional(),
   documentMimeType: z.string().trim().max(100).optional(),
@@ -18,6 +35,7 @@ export const checkInSchema = z.object({
   advanceDepositMethod: z.nativeEnum(PaymentMethod).optional(),
   advanceDepositReference: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
+  occupants: z.array(occupantInputSchema).optional(),
 });
 
 export const checkOutSchema = z.object({
@@ -98,6 +116,42 @@ export const issueInvoiceSchema = z.object({
   stayId: z.string().cuid({ message: 'Invalid stay ID' }),
 });
 
+export const extendStayPreviewSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  newCheckoutDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: 'Valid new checkout date is required',
+  }),
+});
+
+export const extendStaySchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  newCheckoutDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: 'Valid new checkout date is required',
+  }),
+  targetRoomId: z.string().cuid().optional(),
+  transferReason: z.string().trim().max(500).optional(),
+  idempotencyKey: z.string().trim().min(1, 'Idempotency key is required'),
+});
+
+export const addOccupantSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  occupant: occupantInputSchema,
+});
+
+export const removeOccupantSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  stayGuestId: z.string().cuid({ message: 'Invalid stayGuest ID' }),
+  reason: z.string().trim().min(1, 'Reason for removal is required').max(500),
+});
+
+export const transferPrimaryGuestSchema = z.object({
+  stayId: z.string().cuid({ message: 'Invalid stay ID' }),
+  newPrimaryGuestId: z.string().cuid({ message: 'Invalid guest ID' }).optional(),
+  newPrimaryStayGuestId: z.string().cuid({ message: 'Invalid stayGuest ID' }).optional(),
+}).refine((data) => data.newPrimaryGuestId || data.newPrimaryStayGuestId, {
+  message: 'Either newPrimaryGuestId or newPrimaryStayGuestId must be provided',
+});
+
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type CheckOutInput = z.infer<typeof checkOutSchema>;
 export type GuestDocumentUploadInput = z.infer<typeof guestDocumentUploadSchema>;
@@ -109,3 +163,8 @@ export type RecordFolioPaymentInput = z.infer<typeof recordFolioPaymentSchema>;
 export type StayNoteCreateInput = z.infer<typeof stayNoteCreateSchema>;
 export type StayNoteUpdateInput = z.infer<typeof stayNoteUpdateSchema>;
 export type IssueInvoiceInput = z.infer<typeof issueInvoiceSchema>;
+export type OccupantInput = z.infer<typeof occupantInputSchema>;
+export type ExtendStayInput = z.infer<typeof extendStaySchema>;
+export type AddOccupantInput = z.infer<typeof addOccupantSchema>;
+export type RemoveOccupantInput = z.infer<typeof removeOccupantSchema>;
+export type TransferPrimaryGuestInput = z.infer<typeof transferPrimaryGuestSchema>;

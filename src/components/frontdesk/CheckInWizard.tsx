@@ -12,6 +12,7 @@ import {
 } from '@/actions/frontdesk';
 import { WebcamCapture } from './WebcamCapture';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -35,6 +36,7 @@ import {
   File,
   Eye,
   Shield,
+  Plus,
 } from 'lucide-react';
 
 interface EligibleRoom {
@@ -205,6 +207,20 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
   const [additionalDepositAmount, setAdditionalDepositAmount] = useState<string>('0');
   const [additionalDepositMethod, setAdditionalDepositMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [additionalDepositReference, setAdditionalDepositReference] = useState<string>('');
+
+  // Stage 2 & Multi-Guest Occupants state
+  const [primaryGender, setPrimaryGender] = useState<string>('MALE');
+  const [additionalOccupants, setAdditionalOccupants] = useState<
+    Array<{
+      id: string;
+      firstName: string;
+      lastName: string;
+      gender: string;
+      phone: string;
+      idDocumentType: string;
+      idDocumentNumber: string;
+    }>
+  >([]);
 
   // Stage 7 — Notes
   const [notes, setNotes] = useState<string>('');
@@ -393,13 +409,44 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
     formData.append('expectedCheckOut', expectedCheckOutDate);
     formData.append('idDocumentType', idDocumentType);
     formData.append('idDocumentNumber', idDocumentNumber);
+    formData.append('gender', primaryGender);
+
+    // Build authoritative occupants payload
+    const primaryOccupant = {
+      firstName: reservation.primaryGuest.firstName,
+      lastName: reservation.primaryGuest.lastName,
+      gender: primaryGender,
+      phone: reservation.primaryGuest.phone || undefined,
+      email: reservation.primaryGuest.email || undefined,
+      idDocumentType,
+      idDocumentNumber,
+      documentStorageRef: documentStorageRef || undefined,
+      documentFileName: documentFileName || undefined,
+      documentMimeType: documentMimeType || undefined,
+      documentFileSize: documentFileSize || undefined,
+      isPrimary: true,
+    };
+
+    const allOccupants = [
+      primaryOccupant,
+      ...additionalOccupants.map((occ) => ({
+        firstName: occ.firstName.trim(),
+        lastName: occ.lastName.trim(),
+        gender: occ.gender,
+        phone: occ.phone?.trim() || undefined,
+        idDocumentType: occ.idDocumentType,
+        idDocumentNumber: occ.idDocumentNumber.trim(),
+        isPrimary: false,
+      })),
+    ];
+
+    formData.append('occupants', JSON.stringify(allOccupants));
+
     if (documentStorageRef) formData.append('documentStorageRef', documentStorageRef);
-    if (documentDataBase64) formData.append('documentDataBase64', documentDataBase64);
     if (documentFileName) formData.append('documentFileName', documentFileName);
     if (documentMimeType) formData.append('documentMimeType', documentMimeType);
     if (documentFileSize) formData.append('documentFileSize', documentFileSize.toString());
     if (photoStorageRef) formData.append('photoStorageRef', photoStorageRef);
-    if (photoDataBase64) formData.append('photoDataBase64', photoDataBase64);
     if (photoMimeType) formData.append('photoMimeType', photoMimeType);
     if (notes) formData.append('notes', notes);
 
@@ -421,7 +468,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
   };
 
   const canAdvanceFromStage3 = idDocumentNumber.trim().length >= 3 && documentStorageRef !== '' && documentVerificationStatus === 'VERIFIED';
-  const canAdvanceFromStage4 = photoCaptured && photoStorageRef !== '';
+  const canAdvanceFromStage4 = true;
   const canAdvanceFromStage5 = selectedRoomId !== '';
 
   if (successData) {
@@ -561,29 +608,193 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center">
-              <UserCheck className="w-5 h-5 mr-2 text-resort-gold" /> Stage 2: Guest Details & Contact
+              <UserCheck className="w-5 h-5 mr-2 text-resort-gold" /> Stage 2: Guest Details & Occupants
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-xs">
-            <div className="p-4 bg-neutral-50 rounded-lg border border-neutral-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <span className="text-neutral-500 block">Full Name</span>
-                <span className="font-semibold text-neutral-900">
-                  {reservation.primaryGuest.firstName} {reservation.primaryGuest.lastName}
+            {/* Primary Guest */}
+            <div className="p-3 bg-neutral-50 rounded-lg border border-neutral-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-900 text-xs">
+                  Primary Guest: {reservation.primaryGuest.firstName} {reservation.primaryGuest.lastName}
                 </span>
+                <Badge variant="success" className="text-[10px]">Primary</Badge>
               </div>
-              <div>
-                <span className="text-neutral-500 block">Contact Phone</span>
-                <span className="font-mono text-neutral-900">{reservation.primaryGuest.phone || 'Not Provided'}</span>
-              </div>
-              <div>
-                <span className="text-neutral-500 block">Email Address</span>
-                <span className="text-neutral-900">{reservation.primaryGuest.email || 'Not Provided'}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <span className="text-neutral-500 block text-[10px]">Contact Phone</span>
+                  <span className="font-mono text-neutral-900">{reservation.primaryGuest.phone || 'Not Provided'}</span>
+                </div>
+                <div>
+                  <span className="text-neutral-500 block text-[10px]">Email Address</span>
+                  <span className="text-neutral-900">{reservation.primaryGuest.email || 'Not Provided'}</span>
+                </div>
+                <div>
+                  <Label className="text-[10px]">Gender *</Label>
+                  <select
+                    value={primaryGender}
+                    onChange={(e) => setPrimaryGender(e.target.value)}
+                    className="w-full h-7 rounded border border-neutral-300 bg-white px-2 text-xs"
+                  >
+                    <option value="MALE">Male</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
               </div>
             </div>
-            <p className="text-neutral-500 text-[11px]">
-              Confirm contact details with guest for billing communications and keycard authorization.
-            </p>
+
+            {/* Accompanying Occupants Section */}
+            <div className="space-y-2 pt-2 border-t border-neutral-200">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-800">
+                  Additional Occupants ({additionalOccupants.length})
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-neutral-300 text-neutral-700"
+                  onClick={() => {
+                    setAdditionalOccupants([
+                      ...additionalOccupants,
+                      {
+                        id: `occ_${Date.now()}_${Math.random()}`,
+                        firstName: '',
+                        lastName: '',
+                        gender: 'FEMALE',
+                        phone: '',
+                        idDocumentType: 'AADHAAR',
+                        idDocumentNumber: '',
+                      },
+                    ]);
+                  }}
+                >
+                  <Plus className="w-3 h-3 mr-1" /> Add Occupant
+                </Button>
+              </div>
+
+              {additionalOccupants.length === 0 ? (
+                <p className="text-neutral-500 text-[11px] italic">
+                  No accompanying occupants added. If this stay has multiple guests (e.g. couple, family, friends), add their details above. Mandatory identity and document verification applies to each occupant.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {additionalOccupants.map((occ, idx) => (
+                    <div key={occ.id} className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-neutral-800 text-[11px]">
+                          Occupant #{idx + 2}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[10px] text-rose-600 hover:text-rose-700"
+                          onClick={() => {
+                            setAdditionalOccupants(additionalOccupants.filter((o) => o.id !== occ.id));
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-[10px]">First Name *</Label>
+                          <Input
+                            value={occ.firstName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, firstName: val } : o))
+                              );
+                            }}
+                            required
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">Last Name *</Label>
+                          <Input
+                            value={occ.lastName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, lastName: val } : o))
+                              );
+                            }}
+                            required
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">Gender *</Label>
+                          <select
+                            value={occ.gender}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, gender: val } : o))
+                              );
+                            }}
+                            className="w-full h-7 rounded border border-neutral-300 bg-white px-2 text-xs"
+                          >
+                            <option value="FEMALE">Female</option>
+                            <option value="MALE">Male</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">ID Type *</Label>
+                          <select
+                            value={occ.idDocumentType}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, idDocumentType: val } : o))
+                              );
+                            }}
+                            className="w-full h-7 rounded border border-neutral-300 bg-white px-2 text-xs"
+                          >
+                            {ALLOWED_DOC_TYPES.map((dt) => (
+                              <option key={dt.value} value={dt.value}>{dt.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">ID Number *</Label>
+                          <Input
+                            value={occ.idDocumentNumber}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, idDocumentNumber: val } : o))
+                              );
+                            }}
+                            placeholder="Min 3 chars"
+                            required
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">Phone (Optional)</Label>
+                          <Input
+                            value={occ.phone}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdditionalOccupants(
+                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, phone: val } : o))
+                              );
+                            }}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </CardContent>
           <CardFooter className="flex justify-between">
             <Button type="button" variant="outline" onClick={() => setStep(1)}>
@@ -591,7 +802,25 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
             </Button>
             <Button
               type="button"
-              onClick={() => setStep(3)}
+              onClick={() => {
+                // Validate that all additional occupants have required fields
+                for (const occ of additionalOccupants) {
+                  if (!occ.firstName.trim() || !occ.lastName.trim()) {
+                    setError('All occupants must have a first and last name.');
+                    return;
+                  }
+                  if (!occ.gender.trim()) {
+                    setError('All occupants must have a gender specified.');
+                    return;
+                  }
+                  if (!occ.idDocumentNumber.trim() || occ.idDocumentNumber.trim().length < 3) {
+                    setError('All occupants must have a valid ID document number (min 3 characters).');
+                    return;
+                  }
+                }
+                setError(null);
+                setStep(3);
+              }}
               className="bg-resort-charcoal text-white hover:bg-neutral-800"
             >
               Continue to ID Verification <ChevronRight className="w-4 h-4 ml-1" />
@@ -820,6 +1049,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
           <CardContent className="space-y-4">
             <p className="text-xs text-neutral-600">
               Capture a live photo of the guest for security and front-desk recognition. The camera will start automatically.
+              <span className="ml-1 text-neutral-400">(Optional — you may skip if camera is unavailable)</span>
             </p>
             <WebcamCapture
               onCapture={handlePhotoCapture}
@@ -831,14 +1061,26 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
             <Button type="button" variant="outline" onClick={() => setStep(3)}>
               <ChevronLeft className="w-4 h-4 mr-1" /> Back
             </Button>
-            <Button
-              type="button"
-              disabled={!canAdvanceFromStage4}
-              onClick={() => setStep(5)}
-              className="bg-resort-charcoal text-white hover:bg-neutral-800"
-            >
-              Continue to Room Selection <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
+            <div className="flex gap-2">
+              {!photoCaptured && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setStep(5)}
+                  className="border-neutral-300 text-neutral-600"
+                >
+                  Skip Photo <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                disabled={!canAdvanceFromStage4}
+                onClick={() => setStep(5)}
+                className="bg-resort-charcoal text-white hover:bg-neutral-800"
+              >
+                {photoCaptured ? 'Continue to Room Selection' : 'Continue'} <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
           </CardFooter>
         </Card>
       )}

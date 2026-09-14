@@ -16,9 +16,16 @@ import {
   stayNoteCreateSchema,
   stayNoteUpdateSchema,
   issueInvoiceSchema,
+  extendStayPreviewSchema,
+  extendStaySchema,
+  addOccupantSchema,
+  removeOccupantSchema,
+  transferPrimaryGuestSchema,
 } from '@/validations/frontdesk';
 import { executeCheckIn, CheckInResult } from '@/lib/frontdesk/checkin';
 import { executeCheckOut, CheckOutResult } from '@/lib/frontdesk/checkout';
+import { previewStayExtension, executeStayExtension, StayExtensionPreview, StayExtensionResult } from '@/lib/frontdesk/extend-stay';
+import { addOccupantToStay, removeOccupantFromStay, transferPrimaryGuest } from '@/lib/frontdesk/occupants';
 import { getEligibleRoomsForCheckIn } from '@/lib/frontdesk/eligibility';
 import { getInHouseRooms, InHouseFilter, InHouseRoomCard } from '@/lib/frontdesk/inhouse';
 import { executePostServiceCharge, PostChargeResult } from '@/lib/frontdesk/post-charge';
@@ -79,6 +86,8 @@ export async function checkInAction(
       photoDataBase64: formData.get('photoDataBase64')?.toString() || undefined,
       photoMimeType: formData.get('photoMimeType')?.toString() || undefined,
       notes: formData.get('notes')?.toString() || undefined,
+      gender: formData.get('gender')?.toString() || undefined,
+      occupants: formData.get('occupants') ? JSON.parse(formData.get('occupants')!.toString()) : undefined,
       advanceDepositAmount: formData.get('advanceDepositAmount')
         ? Number(formData.get('advanceDepositAmount'))
         : undefined,
@@ -90,8 +99,9 @@ export async function checkInAction(
       reservationId: raw.reservationId,
       roomId: raw.roomId,
       expectedCheckOut: raw.expectedCheckOut,
-      idDocumentType: raw.idDocumentType,
-      idDocumentNumber: raw.idDocumentNumber,
+      idDocumentType: raw.idDocumentType || undefined,
+      idDocumentNumber: raw.idDocumentNumber || undefined,
+      gender: raw.gender,
       documentStorageRef: raw.documentStorageRef,
       documentFileName: raw.documentFileName,
       documentMimeType: raw.documentMimeType,
@@ -101,6 +111,7 @@ export async function checkInAction(
       advanceDepositAmount: raw.advanceDepositAmount,
       advanceDepositMethod: raw.advanceDepositMethod,
       advanceDepositReference: raw.advanceDepositReference,
+      occupants: raw.occupants,
     });
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0].message };
@@ -1289,6 +1300,200 @@ export async function issueInvoiceAction(
     return { success: true, data: result };
   } catch (error) {
     return { success: false, error: (error as Error).message };
+  }
+}
+
+// ----------------------------------------------------
+// 17. PREVIEW STAY EXTENSION
+// Permission: 'booking:read'
+// ----------------------------------------------------
+export async function previewStayExtensionAction(
+  stayId: string,
+  newCheckoutDate: string
+): Promise<ActionResponse<StayExtensionPreview>> {
+  try {
+    await requirePermission('booking:read');
+    const parsed = extendStayPreviewSchema.safeParse({ stayId, newCheckoutDate });
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+    const preview = await previewStayExtension(parsed.data);
+    return { success: true, data: preview };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to preview stay extension',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 18. EXECUTE STAY EXTENSION
+// Permission: 'booking:update'
+// ----------------------------------------------------
+export async function extendStayAction(
+  prevState: ActionResponse<StayExtensionResult> | null,
+  formData: FormData
+): Promise<ActionResponse<StayExtensionResult>> {
+  try {
+    const actor = await requirePermission('booking:update');
+
+    const raw = {
+      stayId: formData.get('stayId')?.toString() || '',
+      newCheckoutDate: formData.get('newCheckoutDate')?.toString() || '',
+      targetRoomId: formData.get('targetRoomId')?.toString() || undefined,
+      transferReason: formData.get('transferReason')?.toString() || undefined,
+      idempotencyKey: formData.get('idempotencyKey')?.toString() || '',
+    };
+
+    const parsed = extendStaySchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await executeStayExtension(parsed.data, {
+      id: actor.id,
+      name: actor.name,
+      role: actor.role,
+    });
+
+    revalidatePath('/admin/dashboard');
+    revalidatePath('/admin/frontdesk');
+    revalidatePath('/admin/frontdesk/inhouse');
+    revalidatePath('/admin/rooms');
+    revalidatePath('/admin/pms/rooms');
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Stay extension failed',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 19. ADD OCCUPANT TO STAY
+// Permission: 'guest:manage'
+// ----------------------------------------------------
+export async function addOccupantAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const actor = await requirePermission('guest:manage');
+
+    const rawOccupant = {
+      firstName: formData.get('firstName')?.toString() || '',
+      lastName: formData.get('lastName')?.toString() || '',
+      gender: formData.get('gender')?.toString() || '',
+      phone: formData.get('phone')?.toString() || undefined,
+      email: formData.get('email')?.toString() || undefined,
+      idDocumentType: formData.get('idDocumentType')?.toString() || '',
+      idDocumentNumber: formData.get('idDocumentNumber')?.toString() || '',
+      documentStorageRef: formData.get('documentStorageRef')?.toString() || undefined,
+      documentFileName: formData.get('documentFileName')?.toString() || undefined,
+      documentMimeType: formData.get('documentMimeType')?.toString() || undefined,
+      documentFileSize: formData.get('documentFileSize') ? Number(formData.get('documentFileSize')) : undefined,
+      isPrimary: false,
+    };
+
+    const parsed = addOccupantSchema.safeParse({
+      stayId: formData.get('stayId')?.toString() || '',
+      occupant: rawOccupant,
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await addOccupantToStay(parsed.data, {
+      id: actor.id,
+      name: actor.name,
+      role: actor.role,
+    });
+
+    revalidatePath('/admin/frontdesk/inhouse');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to add occupant',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 20. REMOVE OCCUPANT FROM STAY
+// Permission: 'guest:manage'
+// ----------------------------------------------------
+export async function removeOccupantAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const actor = await requirePermission('guest:manage');
+
+    const parsed = removeOccupantSchema.safeParse({
+      stayId: formData.get('stayId')?.toString() || '',
+      stayGuestId: formData.get('stayGuestId')?.toString() || '',
+      reason: formData.get('reason')?.toString() || '',
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await removeOccupantFromStay(parsed.data, {
+      id: actor.id,
+      name: actor.name,
+      role: actor.role,
+    });
+
+    revalidatePath('/admin/frontdesk/inhouse');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to remove occupant',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 21. TRANSFER PRIMARY GUEST IN STAY
+// Permission: 'guest:manage'
+// ----------------------------------------------------
+export async function transferPrimaryGuestAction(
+  prevState: ActionResponse | null,
+  formData: FormData
+): Promise<ActionResponse> {
+  try {
+    const actor = await requirePermission('guest:manage');
+
+    const parsed = transferPrimaryGuestSchema.safeParse({
+      stayId: formData.get('stayId')?.toString() || '',
+      newPrimaryGuestId: formData.get('newPrimaryGuestId')?.toString() || undefined,
+      newPrimaryStayGuestId: formData.get('newPrimaryStayGuestId')?.toString() || undefined,
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await transferPrimaryGuest(parsed.data, {
+      id: actor.id,
+      name: actor.name,
+      role: actor.role,
+    });
+
+    revalidatePath('/admin/frontdesk/inhouse');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to transfer primary guest',
+    };
   }
 }
 

@@ -11,6 +11,7 @@ import { GuestDetailsModal } from '@/components/frontdesk/GuestDetailsModal';
 import { RecordPaymentModal } from '@/components/frontdesk/RecordPaymentModal';
 import { StayNotesModal } from '@/components/frontdesk/StayNotesModal';
 import { CheckoutConfirmModal } from '@/components/frontdesk/CheckoutConfirmModal';
+import { ExtendStayModal } from '@/components/frontdesk/ExtendStayModal';
 import {
   BedDouble,
   Phone,
@@ -24,6 +25,7 @@ import {
   MessageSquare,
   Receipt,
   FileText,
+  Calendar,
 } from 'lucide-react';
 
 interface InHouseCardGridProps {
@@ -59,6 +61,7 @@ export function InHouseCardGrid({ rooms, searchQuery, filter }: InHouseCardGridP
   const [paymentRoom, setPaymentRoom] = useState<InHouseRoomCard | null>(null);
   const [notesRoom, setNotesRoom] = useState<InHouseRoomCard | null>(null);
   const [checkoutRoom, setCheckoutRoom] = useState<InHouseRoomCard | null>(null);
+  const [extendStayRoom, setExtendStayRoom] = useState<InHouseRoomCard | null>(null);
 
   if (rooms.length === 0) {
     return (
@@ -233,6 +236,14 @@ export function InHouseCardGrid({ rooms, searchQuery, filter }: InHouseCardGridP
                     size="sm"
                     variant="outline"
                     className="h-7 text-[10px] border-resort-sand text-resort-charcoal-text hover:bg-resort-sand-light"
+                    onClick={() => setExtendStayRoom(room)}
+                  >
+                    <Calendar className="w-3 h-3 mr-0.5" /> Extend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[10px] border-resort-sand text-resort-charcoal-text hover:bg-resort-sand-light"
                     onClick={() => router.push('/admin/frontdesk/inhouse/' + room.stayId + '/bill')}
                   >
                     <Receipt className="w-3 h-3 mr-0.5" /> Invoice
@@ -265,6 +276,23 @@ export function InHouseCardGrid({ rooms, searchQuery, filter }: InHouseCardGridP
           roomNumber={chargeRoom.roomNumber}
           guestName={chargeRoom.guestName}
           onClose={() => setChargeRoom(null)}
+        />
+      )}
+
+      {extendStayRoom && (
+        <ExtendStayModal
+          stayId={extendStayRoom.stayId}
+          stayNumber={extendStayRoom.stayNumber}
+          currentRoomNumber={extendStayRoom.roomNumber}
+          currentRoomTypeName={extendStayRoom.roomTypeName}
+          currentExpectedCheckout={extendStayRoom.expectedCheckOut}
+          guestName={extendStayRoom.guestName}
+          isOpen={true}
+          onClose={() => setExtendStayRoom(null)}
+          onSuccess={() => {
+            setExtendStayRoom(null);
+            router.refresh();
+          }}
         />
       )}
 
