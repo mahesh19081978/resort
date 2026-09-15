@@ -25,16 +25,18 @@ export async function GET(request: NextRequest) {
     const chromePath = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
 
     if (chromePath) {
-      // @ts-expect-error optional runtime dependency
-      const puppeteer = await import('puppeteer-core');
-      const browser = await puppeteer.default.launch({
-        executablePath: chromePath,
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      try {
+        const pkgName = 'puppeteer-core';
+        // Dynamically require/import optional runtime dependency only when CHROME_PATH is configured
+        const puppeteer = await import(/* webpackIgnore: true */ pkgName);
+        const browser = await (puppeteer.default || puppeteer).launch({
+          executablePath: chromePath,
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
 
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
       const pdfBuffer = await page.pdf({
         format: 'A4',
@@ -53,6 +55,9 @@ export async function GET(request: NextRequest) {
           'Content-Disposition': `inline; filename="${filename}"`,
         },
       });
+      } catch (pdfErr) {
+        console.warn('[BILL_PDF] Puppeteer PDF rendering failed, falling back to HTML:', pdfErr);
+      }
     }
 
     return new NextResponse(html, {

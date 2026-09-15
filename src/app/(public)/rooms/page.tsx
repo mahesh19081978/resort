@@ -76,8 +76,8 @@ export default async function RoomsPage() {
               <div className="relative">
                 <div className="relative rounded-2xl overflow-hidden shadow-luxury-lg aspect-[4/5]">
                   <Image
-                    src={featuredRoom.media[0]?.fileUrl || IMAGES.rooms[1].image}
-                    alt={`${featuredRoom.name} at Infinity Resort`}
+                    src={featuredRoom?.media?.[0]?.fileUrl || IMAGES.rooms[1].image}
+                    alt={featuredRoom?.name ? `${featuredRoom.name} at Infinity Resort` : 'Accommodations at Infinity Resort'}
                     fill
                     className="object-cover"
                     sizes="(max-width: 1024px) 100vw, 50vw"
@@ -141,6 +141,20 @@ export default async function RoomsPage() {
                   <RoomCard room={room} />
                 </ScrollReveal>
               ))}
+            </div>
+          )}
+
+          {!featuredRoom && remainingRooms.length === 0 && (
+            <div className="mt-12 text-center py-12 bg-white/60 rounded-2xl border border-resort-sand/60">
+              <p className="text-sm text-resort-muted">
+                Room details are currently being updated. Please check back shortly or contact our front desk for availability.
+              </p>
+              <Link
+                href="/booking"
+                className="inline-flex items-center gap-2 mt-4 text-xs font-semibold text-resort-gold-dark hover:text-resort-forest transition-colors"
+              >
+                Go to Direct Booking &rarr;
+              </Link>
             </div>
           )}
         </div>

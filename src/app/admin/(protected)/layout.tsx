@@ -3,6 +3,8 @@ import { AdminSidebar, AdminTopbar } from '@/components/layout/AdminNavigation';
 import { getCurrentUser } from '@/lib/auth/auth';
 import { getBusinessDateNow } from '@/lib/frontdesk/arrivals';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminLayout({
   children,
 }: {
