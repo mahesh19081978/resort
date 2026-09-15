@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getStayDetail } from '@/lib/guest-db/stay-detail';
-import { addOccupantAction, removeOccupantAction, transferPrimaryGuestAction } from '@/actions/frontdesk';
+import { addOccupantAction, removeOccupantAction, transferPrimaryGuestAction, getStayDetailAction } from '@/actions/frontdesk';
+import type { StayDetailData } from '@/lib/guest-db/stay-detail';
 import {
   X,
   User,
@@ -65,7 +65,7 @@ function maskIdNumber(idNumber: string): string {
 export function GuestDetailsModal({ stayId, guestName, roomNumber, onClose }: GuestDetailsModalProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<Awaited<ReturnType<typeof getStayDetail>> | null>(null);
+  const [detail, setDetail] = useState<StayDetailData | null>(null);
 
   // Add occupant state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -81,8 +81,13 @@ export function GuestDetailsModal({ stayId, guestName, roomNumber, onClose }: Gu
   async function load() {
     try {
       setLoading(true);
-      const data = await getStayDetail(stayId);
-      setDetail(data);
+      setError(null);
+      const res = await getStayDetailAction(stayId);
+      if (res.success && res.data) {
+        setDetail(res.data);
+      } else {
+        setError(res.error || 'Failed to load guest details');
+      }
       setLoading(false);
     } catch (e) {
       setError('Failed to load guest details');
@@ -398,31 +403,31 @@ export function GuestDetailsModal({ stayId, guestName, roomNumber, onClose }: Gu
                 {/* Occupants List */}
                 <div className="divide-y divide-resort-sand/60 border border-resort-sand rounded-lg overflow-hidden">
                   {detail.accompanyingGuests.map((g) => {
-                    const doc = g.documents?.[0];
+                    const docs = g.documents && g.documents.length > 0 ? g.documents : [];
                     return (
                       <div
                         key={g.id}
-                        className={`p-2.5 flex items-center justify-between text-xs ${
+                        className={`p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
                           !g.isActive ? 'bg-neutral-50 opacity-60' : 'bg-white'
                         }`}
                       >
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-resort-charcoal">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-resort-charcoal text-sm">
                               {g.firstName} {g.lastName}
                             </span>
                             {g.gender && (
-                              <Badge variant="outline" className="text-[9px] py-0 px-1">
+                              <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono">
                                 {g.gender}
                               </Badge>
                             )}
                             {g.isPrimary ? (
                               <Badge variant="success" className="text-[9px] py-0 px-1.5 flex items-center gap-0.5">
-                                <Crown className="w-2.5 h-2.5" /> PRIMARY
+                                <Crown className="w-2.5 h-2.5" /> PRIMARY GUEST
                               </Badge>
                             ) : g.isActive ? (
-                              <Badge variant="secondary" className="text-[9px] py-0 px-1">
-                                ADDITIONAL
+                              <Badge variant="secondary" className="text-[9px] py-0 px-1 font-normal">
+                                ADDITIONAL GUEST
                               </Badge>
                             ) : null}
                             {!g.isActive && (
@@ -431,21 +436,32 @@ export function GuestDetailsModal({ stayId, guestName, roomNumber, onClose }: Gu
                               </Badge>
                             )}
                           </div>
-                          <div className="text-[11px] text-resort-muted flex items-center gap-2">
-                            {doc && (
-                              <span>
-                                {doc.documentType}: <span className="font-mono">{maskIdNumber(doc.documentNumber)}</span>
-                                {doc.verificationStatus === 'VERIFIED' && ' (Verified)'}
-                              </span>
+
+                          <div className="text-[11px] text-resort-muted flex items-center gap-3 flex-wrap">
+                            {docs.length > 0 ? (
+                              docs.map((d) => (
+                                <span key={d.id} className="inline-flex items-center gap-1 bg-neutral-100 px-2 py-0.5 rounded text-neutral-800">
+                                  <FileText className="w-3 h-3 text-neutral-500" />
+                                  <span className="font-medium">{d.documentType.replace('_', ' ')}:</span>
+                                  <span className="font-mono">{d.documentNumber}</span>
+                                  <span className={`text-[9px] px-1 py-0.2 rounded font-medium ${
+                                    d.verificationStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    {d.verificationStatus}
+                                  </span>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="italic text-neutral-400">No ID document registered</span>
                             )}
-                            {g.phone && <span>• {g.phone}</span>}
+                            {g.phone && <span className="font-mono">Phone: {g.phone}</span>}
                             {g.removedReason && <span>• Reason: {g.removedReason}</span>}
                           </div>
                         </div>
 
                         {/* Occupant Actions */}
                         {detail.status === 'ACTIVE' && g.isActive && (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
                             {!g.isPrimary && (
                               <>
                                 <Button

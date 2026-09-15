@@ -58,35 +58,35 @@ export default async function InventoryDashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className="border-l-4 border-l-resort-forest bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-resort-stone">Physical Stores</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted">Physical Stores</p>
               <p className="text-2xl font-serif font-bold text-resort-charcoal mt-1">{stores.length}</p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+            <div className="w-10 h-10 rounded-full bg-resort-forest/10 flex items-center justify-center text-resort-forest">
               <Warehouse className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-resort-gold bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-resort-stone">Catalog Items</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted">Catalog Items</p>
               <p className="text-2xl font-serif font-bold text-resort-charcoal mt-1">{itemsCount}</p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+            <div className="w-10 h-10 rounded-full bg-resort-gold/15 flex items-center justify-center text-resort-gold-dark">
               <Boxes className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-amber-500 bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-resort-stone">Pending Transfers</p>
-              <p className="text-2xl font-serif font-bold text-amber-600 mt-1">{pendingTransfers}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">Pending Transfers</p>
+              <p className="text-2xl font-serif font-bold text-amber-950 mt-1">{pendingTransfers}</p>
             </div>
             <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
               <ArrowLeftRight className="w-5 h-5" />
@@ -94,13 +94,13 @@ export default async function InventoryDashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-resort-olive bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-resort-stone">Ledger Movements</p>
-              <p className="text-2xl font-serif font-bold text-resort-forest mt-1">{movementsCount}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted">Ledger Movements</p>
+              <p className="text-2xl font-serif font-bold text-resort-charcoal mt-1">{movementsCount}</p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-resort-sand/40 flex items-center justify-center text-resort-forest">
+            <div className="w-10 h-10 rounded-full bg-resort-olive/15 flex items-center justify-center text-resort-olive">
               <ClipboardCheck className="w-5 h-5" />
             </div>
           </CardContent>

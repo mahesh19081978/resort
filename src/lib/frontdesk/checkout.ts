@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { Prisma, PhysicalRoomStatus, StayStatus, RoomAssignmentStatus, FolioStatus, PaymentStatus, PaymentContext, PaymentMethod } from '@prisma/client';
+import { Prisma, PrismaClient, PhysicalRoomStatus, StayStatus, RoomAssignmentStatus, FolioStatus, PaymentStatus, PaymentContext, PaymentMethod } from '@prisma/client';
 import { recordAuditEvent } from '@/lib/auth/audit';
 
 export interface ExecuteCheckOutParams {
@@ -23,6 +23,12 @@ export interface CheckOutResult {
   checkoutAt: Date;
 }
 
+export type CheckOutDatabaseClient = PrismaClient | Prisma.TransactionClient;
+
+function hasTransaction(client: CheckOutDatabaseClient): client is PrismaClient {
+  return '$transaction' in client && typeof (client as PrismaClient).$transaction === 'function';
+}
+
 /**
  * Transactional Checkout Workflow:
  * 1. Lock and validate active Stay.
@@ -41,12 +47,12 @@ export interface CheckOutResult {
  *    - Update Room status: OCCUPIED -> DIRTY
  *    - Update Stay: status = CHECKED_OUT, actualCheckOut = now()
  *    - If associated Reservation has no remaining active stays, update Reservation -> COMPLETED
- * 8. Atomic AuditLog: CHECKOUT_COMPLETED
+ *    - Atomic AuditLog: CHECKOUT_COMPLETED
  */
 export async function executeCheckOut(
   params: ExecuteCheckOutParams,
   actor: { id: string; name?: string; role: string },
-  db: Prisma.TransactionClient | typeof prisma = prisma
+  db: CheckOutDatabaseClient = prisma
 ): Promise<CheckOutResult> {
   const runner = async (tx: Prisma.TransactionClient): Promise<CheckOutResult> => {
     // 1. Fetch Stay
@@ -239,8 +245,11 @@ export async function executeCheckOut(
     };
   };
 
-  if ('$transaction' in db && typeof (db as any).$transaction === 'function') {
-    return await (db as typeof prisma).$transaction(runner);
+  if (hasTransaction(db)) {
+    return await db.$transaction(runner, {
+      timeout: 30000,
+      maxWait: 10000,
+    });
   }
-  return await runner(db as Prisma.TransactionClient);
+  return await runner(db);
 }

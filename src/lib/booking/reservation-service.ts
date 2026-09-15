@@ -117,10 +117,10 @@ export async function createReservationHold(
           }
         }
 
-        // Check if retryable transaction timeout or lock timeout error
+        // Check if retryable transaction timeout, server closed connection (e.g. statement timeout), or lock timeout error
         const isTimeoutOrLockContention =
           err instanceof Prisma.PrismaClientKnownRequestError &&
-          (err.code === 'P2028' || err.code === 'P2034');
+          (err.code === 'P2028' || err.code === 'P2034' || err.code === 'P1017');
 
         if (isTimeoutOrLockContention && attempt < maxAttempts) {
           // Check if an idempotent winner has already completed during lock contention

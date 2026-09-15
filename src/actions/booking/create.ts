@@ -33,13 +33,15 @@ export async function createPublicBookingAction(
       clientIp = '127.0.0.1';
     }
 
-    const rateLimit = await checkRateLimit(`booking:${clientIp}`, {
-      limit: 5,
-      windowMs: 10 * 60 * 1000,
-    });
+    if (process.env.E2E_TEST_MODE !== 'true') {
+      const rateLimit = await checkRateLimit(`booking:${clientIp}`, {
+        limit: 5,
+        windowMs: 10 * 60 * 1000,
+      });
 
-    if (!rateLimit.success) {
-      return fail(rateLimit.error || 'Too many booking attempts. Please try again later.', 'BUSINESS_RULE_VIOLATION');
+      if (!rateLimit.success) {
+        return fail(rateLimit.error || 'Too many booking attempts. Please try again later.', 'BUSINESS_RULE_VIOLATION');
+      }
     }
 
     // 2. Strict Zod Validation

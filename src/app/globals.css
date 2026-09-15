@@ -57,6 +57,12 @@
     @apply h-px w-12 bg-resort-gold;
   }
 
+  /* Admin PMS Unified Typography: Ensure the clean, modern font used in the sidebar menu applies to ALL admin headings, titles, cards, and elements */
+  .admin-pms-theme,
+  .admin-pms-theme * {
+    font-family: 'DM Sans', Inter, system-ui, -apple-system, sans-serif !important;
+  }
+
   .gold-line-wide {
     @apply h-px w-20 bg-resort-gold;
   }

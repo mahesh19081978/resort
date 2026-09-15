@@ -145,44 +145,44 @@ export default async function RoomsPage({ searchParams }: RoomsPageProps) {
     switch (status) {
       case 'AVAILABLE':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-            <CheckCircle2 className="h-3 w-3" /> Available
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200">
+            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Available
           </span>
         );
       case 'RESERVED':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
-            <Clock className="h-3 w-3" /> Reserved
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+            <Clock className="h-3 w-3 text-amber-600" /> Reserved
           </span>
         );
       case 'OCCUPIED':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 ring-1 ring-inset ring-purple-600/20">
-            <BedDouble className="h-3 w-3" /> Occupied
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-resort-forest/10 px-2.5 py-0.5 text-[11px] font-semibold text-resort-forest border border-resort-forest/20">
+            <BedDouble className="h-3 w-3 text-resort-forest" /> Occupied
           </span>
         );
       case 'DIRTY':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/20">
-            <AlertTriangle className="h-3 w-3" /> Dirty
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-0.5 text-[11px] font-semibold text-orange-800 border border-orange-200">
+            <AlertTriangle className="h-3 w-3 text-orange-600" /> Dirty
           </span>
         );
       case 'CLEANING':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2.5 py-0.5 text-xs font-semibold text-cyan-700 ring-1 ring-inset ring-cyan-600/20">
-            <Sparkles className="h-3 w-3" /> Cleaning
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#65745B]/10 px-2.5 py-0.5 text-[11px] font-semibold text-[#2C3B24] border border-[#65745B]/30">
+            <Sparkles className="h-3 w-3 text-[#65745B]" /> Cleaning
           </span>
         );
       case 'MAINTENANCE':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20">
-            <Wrench className="h-3 w-3" /> Maintenance
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-0.5 text-[11px] font-semibold text-stone-800 border border-stone-300">
+            <Wrench className="h-3 w-3 text-stone-600" /> Maintenance
           </span>
         );
       case 'OUT_OF_ORDER':
         return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-semibold text-stone-700 ring-1 ring-inset ring-stone-600/20">
-            <Ban className="h-3 w-3" /> Out of Order
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-800 border border-rose-200">
+            <Ban className="h-3 w-3 text-rose-600" /> Out of Order
           </span>
         );
     }

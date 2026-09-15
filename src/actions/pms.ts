@@ -546,6 +546,8 @@ export async function updateRoomStatusAction(
       return roomUpdated;
     });
 
+    revalidatePath('/admin/dashboard');
+    revalidatePath('/admin/frontdesk');
     revalidatePath('/admin/rooms');
     revalidatePath(`/admin/rooms/${updated.id}`);
     return { success: true, data: updated };

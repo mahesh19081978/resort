@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { Prisma, ReservationStatus } from '@prisma/client';
+import { Prisma, ReservationStatus, PaymentStatus, PaymentContext, RefundStatus } from '@prisma/client';
 
 const PROPERTY_TIMEZONE = 'Asia/Kolkata';
 
@@ -62,6 +62,44 @@ export function buildExpectedArrivalsWhere(businessDate: string): Prisma.Reserva
 }
 
 /**
+ * Calculates the advance paid amount from authoritative Payment records.
+ * Uses Prisma Decimal for financial precision — no JS Number arithmetic.
+ *
+ * Advance Paid = sum of SUCCESS Payment.amount where:
+ *   Payment.reservationId = reservation.id
+ *   Payment.context = RESERVATION_ADVANCE
+ *   minus processed refunds
+ */
+export function calculateAdvancePaidFromPayments(
+  payments: Array<{
+    amount: Prisma.Decimal;
+    status: PaymentStatus;
+    context: PaymentContext;
+    refunds?: Array<{ amount: Prisma.Decimal; status: RefundStatus }>;
+    notes?: string | null;
+  }>
+): Prisma.Decimal {
+  let totalPaid = new Prisma.Decimal(0);
+  let totalRefunded = new Prisma.Decimal(0);
+
+  for (const payment of payments) {
+    if (payment.status === PaymentStatus.SUCCESS && payment.context === PaymentContext.RESERVATION_ADVANCE) {
+      totalPaid = totalPaid.add(payment.amount);
+
+      if (payment.refunds) {
+        for (const refund of payment.refunds) {
+          if (refund.status === RefundStatus.PROCESSED) {
+            totalRefunded = totalRefunded.add(refund.amount);
+          }
+        }
+      }
+    }
+  }
+
+  return totalPaid.sub(totalRefunded);
+}
+
+/**
  * Returns the count of expected arrivals for the given business date.
  * Used by the Front Desk dashboard card.
  */
@@ -71,21 +109,32 @@ export async function getExpectedArrivalsCount(businessDate: string): Promise<nu
 }
 
 /**
- * Returns the full reservation rows for expected arrivals.
+ * Returns the full reservation rows for expected arrivals with
+ * advance paid derived from authoritative Payment records.
  * Used by the Arrivals page.
  */
 export async function getExpectedArrivals(businessDate: string) {
   const where = buildExpectedArrivalsWhere(businessDate);
 
-  return prisma.reservation.findMany({
+  const reservations = await prisma.reservation.findMany({
     where,
     include: {
       primaryGuest: true,
       reservedRooms: {
         include: { roomType: true },
       },
+      payments: {
+        include: {
+          refunds: true,
+        },
+      },
     },
     orderBy: { checkInDate: 'asc' },
     take: 50,
   });
+
+  return reservations.map((reservation) => ({
+    ...reservation,
+    calculatedAdvancePaid: calculateAdvancePaidFromPayments(reservation.payments),
+  }));
 }

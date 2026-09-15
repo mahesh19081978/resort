@@ -62,6 +62,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
       sessionVersion: user.sessionVersion,
     };
   } catch (error) {
+    console.error('[AUTH_GET_CURRENT_USER_ERROR]', error);
     // Fail closed on any exception (network drop, DB authentication error, tampered token)
     // NEVER grant access via offline fallback
     if (error instanceof Error && error.message.includes('[CRITICAL SECURITY CONFIGURATION ERROR]')) {

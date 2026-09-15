@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useTransition, useRef } from 'react';
 import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
+import { calculatePublicPricingAction, PublicPricingSummary } from '@/actions/booking/pricing';
 import {
   CalendarDays,
   Users,
@@ -112,6 +113,12 @@ function BookingForm() {
   const [bookingRequestId] = useState(() => generateUUID());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Authoritative Server Pricing Preview State
+  const [serverPricing, setServerPricing] = useState<PublicPricingSummary | null>(null);
+  const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const latestPricingRequestId = useRef(0);
+
   // Hold State vs Confirmed State
   const [activeHold, setActiveHold] = useState<SanitizedPublicBooking | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<SanitizedPublicBooking | null>(null);
@@ -193,15 +200,64 @@ function BookingForm() {
 
   const selectedRoom = availableTypes.find((r) => r.roomTypeId === roomTypeId) || availableTypes[0];
 
-  // Calculate stay duration and authoritative preview numbers
   const nightsCount = Math.max(
     1,
     Math.round(
       (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)
     ) || 1
   );
-  const estimatedStayTotal = (selectedRoom?.basePrice || 0) * nightsCount * (Number(roomsCount) || 1) * 1.18;
-  const formattedTotalPayable = formatCurrency(Math.round(estimatedStayTotal));
+
+  // Authoritative Pricing Preview Query with strict request sequencing to prevent stale overwrites
+  useEffect(() => {
+    if (!roomTypeId || !checkIn || !checkOut || checkIn >= checkOut) {
+      setServerPricing(null);
+      setIsPricingLoading(false);
+      return;
+    }
+
+    const currentRequestId = ++latestPricingRequestId.current;
+    setIsPricingLoading(true);
+    setPricingError(null);
+
+    calculatePublicPricingAction({
+      checkInDate: checkIn,
+      checkOutDate: checkOut,
+      rooms: [
+        {
+          roomTypeId,
+          roomsCount: Number(roomsCount) || 1,
+        },
+      ],
+    })
+      .then((res) => {
+        // Discard if a subsequent request has been fired
+        if (latestPricingRequestId.current !== currentRequestId) return;
+
+        if (res.success && res.data) {
+          setServerPricing(res.data);
+          setPricingError(null);
+        } else {
+          setServerPricing(null);
+          setPricingError(res.error?.message || 'Unable to calculate authoritative pricing.');
+        }
+      })
+      .catch((err) => {
+        if (latestPricingRequestId.current !== currentRequestId) return;
+        setServerPricing(null);
+        setPricingError(err?.message || 'Pricing calculation failed.');
+      })
+      .finally(() => {
+        if (latestPricingRequestId.current === currentRequestId) {
+          setIsPricingLoading(false);
+        }
+      });
+  }, [checkIn, checkOut, roomTypeId, roomsCount]);
+
+  const formattedTotalPayable = serverPricing
+    ? formatCurrency(serverPricing.requiredAdvanceAmount)
+    : isPricingLoading
+    ? 'Calculating...'
+    : '—';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +265,16 @@ function BookingForm() {
 
     if (!roomTypeId) {
       setErrorMessage('Please select an available room category.');
+      return;
+    }
+
+    if (isPricingLoading || !serverPricing) {
+      setErrorMessage('Please wait for pricing calculation to complete before submitting.');
+      return;
+    }
+
+    if (pricingError) {
+      setErrorMessage(`Pricing error: ${pricingError}`);
       return;
     }
 
@@ -726,10 +792,18 @@ function BookingForm() {
                   {/* Authoritative pricing breakdown preview */}
                   <PaymentSummaryBreakdown
                     roomName={selectedRoom?.name || ''}
-                    nights={nightsCount}
+                    nights={serverPricing?.nights ?? nightsCount}
                     roomsCount={Number(roomsCount) || 1}
                     basePricePerNight={Number(selectedRoom?.basePrice) || 0}
                     paymentMethod={paymentMethod}
+                    subtotal={serverPricing?.subtotal ?? null}
+                    taxAmount={serverPricing?.taxAmount ?? null}
+                    taxRatePercent={serverPricing?.taxRatePercent ?? null}
+                    totalAmount={serverPricing?.totalAmount ?? null}
+                    requiredAdvanceAmount={serverPricing?.requiredAdvanceAmount ?? null}
+                    balanceAtHotel={serverPricing?.balanceAtHotel ?? null}
+                    isLoading={isPricingLoading}
+                    pricingError={pricingError}
                   />
 
                   <PaymentSecurityTrust />
@@ -753,7 +827,14 @@ function BookingForm() {
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  disabled={isPending || isRedirecting || availableTypes.length === 0}
+                  disabled={
+                    isPending ||
+                    isRedirecting ||
+                    availableTypes.length === 0 ||
+                    isPricingLoading ||
+                    !!pricingError ||
+                    !serverPricing
+                  }
                   suppressHydrationWarning
                   className="w-full sm:w-auto px-10 py-4 bg-resort-gold text-resort-charcoal-text font-semibold rounded-full hover:bg-resort-gold-light transition-all duration-300 hover:shadow-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
@@ -765,21 +846,18 @@ function BookingForm() {
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" /> Securing Inventory Hold...
                     </>
+                  ) : isPricingLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Calculating Rate...
+                    </>
                   ) : paymentMethod === 'PAY_AT_HOTEL' ? (
                     <>
                       <Check className="h-4 w-4" /> Confirm Booking (Pay at Hotel)
                     </>
-                  ) : onlineSubMethod === 'CARD' ? (
-                    <>
-                      <Lock className="h-4 w-4" /> Continue Secure Card Payment
-                    </>
-                  ) : onlineSubMethod === 'UPI' ? (
-                    <>
-                      <Lock className="h-4 w-4" /> Continue to UPI Payment
-                    </>
                   ) : (
                     <>
-                      <Lock className="h-4 w-4" /> Continue to Net Banking
+                      Proceed to Online Payment ({formattedTotalPayable})
+                      <ArrowRight className="h-4 w-4" />
                     </>
                   )}
                 </button>

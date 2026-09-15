@@ -80,63 +80,63 @@ export default async function FrontDeskDashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-amber-500">
+        <Card className="border-l-4 border-l-resort-gold bg-white hover:shadow-md transition-shadow">
           <CardHeader className="p-4 pb-1">
-            <CardDescription className="text-xs uppercase tracking-wider font-semibold text-neutral-500">
+            <CardDescription className="text-[10px] uppercase tracking-wider font-semibold text-resort-muted">
               Expected Arrivals Today
             </CardDescription>
-            <CardTitle className="text-2xl font-bold text-neutral-800 flex items-center justify-between">
+            <CardTitle className="text-2xl font-serif font-bold text-resort-charcoal flex items-center justify-between mt-1">
               {arrivalsToday}
-              <LogIn className="w-5 h-5 text-amber-500" />
+              <LogIn className="w-5 h-5 text-resort-gold" />
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <Link href="/admin/frontdesk/arrivals" className="text-xs text-amber-600 hover:underline flex items-center mt-1">
+            <Link href="/admin/frontdesk/arrivals" className="text-xs text-resort-gold-dark font-medium hover:underline flex items-center mt-1">
               View arrivals <ArrowRight className="w-3 h-3 ml-1" />
             </Link>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-blue-500">
+        <Card className="border-l-4 border-l-resort-forest bg-white hover:shadow-md transition-shadow">
           <CardHeader className="p-4 pb-1">
-            <CardDescription className="text-xs uppercase tracking-wider font-semibold text-neutral-500">
+            <CardDescription className="text-[10px] uppercase tracking-wider font-semibold text-resort-muted">
               In-House Guests / Stays
             </CardDescription>
-            <CardTitle className="text-2xl font-bold text-neutral-800 flex items-center justify-between">
+            <CardTitle className="text-2xl font-serif font-bold text-resort-charcoal flex items-center justify-between mt-1">
               {inHouseStays}
-              <Users className="w-5 h-5 text-blue-500" />
+              <Users className="w-5 h-5 text-resort-forest" />
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <Link href="/admin/frontdesk/inhouse" className="text-xs text-blue-600 hover:underline flex items-center mt-1">
+            <Link href="/admin/frontdesk/inhouse" className="text-xs text-resort-forest font-medium hover:underline flex items-center mt-1">
               View active stays <ArrowRight className="w-3 h-3 ml-1" />
             </Link>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-rose-500">
+        <Card className="border-l-4 border-l-resort-olive bg-white hover:shadow-md transition-shadow">
           <CardHeader className="p-4 pb-1">
-            <CardDescription className="text-xs uppercase tracking-wider font-semibold text-neutral-500">
+            <CardDescription className="text-[10px] uppercase tracking-wider font-semibold text-resort-muted">
               Departures Today
             </CardDescription>
-            <CardTitle className="text-2xl font-bold text-neutral-800 flex items-center justify-between">
+            <CardTitle className="text-2xl font-serif font-bold text-resort-charcoal flex items-center justify-between mt-1">
               {departuresToday}
-              <LogOut className="w-5 h-5 text-rose-500" />
+              <LogOut className="w-5 h-5 text-resort-olive" />
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <Link href="/admin/frontdesk/departures" className="text-xs text-rose-600 hover:underline flex items-center mt-1">
+            <Link href="/admin/frontdesk/departures" className="text-xs text-resort-olive-light font-medium hover:underline flex items-center mt-1">
               View departures <ArrowRight className="w-3 h-3 ml-1" />
             </Link>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-emerald-500">
+        <Card className="border-l-4 border-l-emerald-600 bg-white hover:shadow-md transition-shadow">
           <CardHeader className="p-4 pb-1">
-            <CardDescription className="text-xs uppercase tracking-wider font-semibold text-neutral-500">
+            <CardDescription className="text-[10px] uppercase tracking-wider font-semibold text-resort-muted">
               Rooms Ready for Check-In
             </CardDescription>
-            <CardTitle className="text-2xl font-bold text-neutral-800 flex items-center justify-between">
+            <CardTitle className="text-2xl font-serif font-bold text-emerald-950 flex items-center justify-between mt-1">
               {availableRooms}
               <BedDouble className="w-5 h-5 text-emerald-500" />
             </CardTitle>

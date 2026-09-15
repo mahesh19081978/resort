@@ -283,7 +283,7 @@ export function BillDetailView({ bill }: { bill: BillDetailData }) {
                   </div>
                 )}
                 <div className="flex justify-between text-resort-stone">
-                  <span>GST Taxes (5%)</span>
+                  <span>Taxes & GST</span>
                   <span className="font-medium">{formatCurrency(bill.taxAmount)}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-resort-charcoal pt-2 border-t border-resort-sand">

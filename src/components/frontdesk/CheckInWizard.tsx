@@ -174,23 +174,138 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
   const [error, setError] = useState<string | null>(null);
   const [successData, setSuccessData] = useState<any | null>(null);
 
-  // Stage 3 — Document state
-  const [idDocumentType, setIdDocumentType] = useState<IdDocumentType>(IdDocumentType.AADHAAR);
-  const [idDocumentNumber, setIdDocumentNumber] = useState<string>('');
-  const [documentFile, setDocumentFile] = useState<File | null>(null);
-  const [documentPreview, setDocumentPreview] = useState<string | null>(null);
-  const [documentUploadState, setDocumentUploadState] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [documentStorageRef, setDocumentStorageRef] = useState<string>('');
-  const [documentDataBase64, setDocumentDataBase64] = useState<string>('');
-  const [documentFileName, setDocumentFileName] = useState<string>('');
-  const [documentMimeType, setDocumentMimeType] = useState<string>('');
-  const [documentFileSize, setDocumentFileSize] = useState<number>(0);
-  const [documentId, setDocumentId] = useState<string>('');
-  const [documentVerificationStatus, setDocumentVerificationStatus] = useState<string>('PENDING');
+  // Stage 2 & Multi-Guest Occupants state (Stage 2 collects: firstName, lastName, gender, phone optional)
+  const [primaryGender, setPrimaryGender] = useState<string>('MALE');
+  const [additionalOccupants, setAdditionalOccupants] = useState<
+    Array<{
+      id: string;
+      firstName: string;
+      lastName: string;
+      gender: string;
+      phone: string;
+    }>
+  >([]);
+
+  // Stage 3 — Multi-Guest Document State
+  interface GuestDocEntry {
+    occupantId: string; // 'primary' or occupant id
+    fullName: string;
+    isPrimary: boolean;
+    gender: string;
+    phone?: string;
+    idDocumentType: IdDocumentType;
+    idDocumentNumber: string;
+    documentFile: File | null;
+    documentPreview: string | null;
+    documentUploadState: 'idle' | 'uploading' | 'success' | 'error';
+    documentStorageRef: string;
+    documentDataBase64: string;
+    documentFileName: string;
+    documentMimeType: string;
+    documentFileSize: number;
+    documentId: string;
+    documentVerificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+    selectedExistingDocId: string;
+    documentError: string | null;
+  }
+
+  const [guestDocs, setGuestDocs] = useState<GuestDocEntry[]>(() => [
+    {
+      occupantId: 'primary',
+      fullName: `${reservation.primaryGuest.firstName} ${reservation.primaryGuest.lastName}`,
+      isPrimary: true,
+      gender: 'MALE',
+      phone: reservation.primaryGuest.phone || undefined,
+      idDocumentType: IdDocumentType.AADHAAR,
+      idDocumentNumber: '',
+      documentFile: null,
+      documentPreview: null,
+      documentUploadState: 'idle',
+      documentStorageRef: '',
+      documentDataBase64: '',
+      documentFileName: '',
+      documentMimeType: '',
+      documentFileSize: 0,
+      documentId: '',
+      documentVerificationStatus: 'PENDING',
+      selectedExistingDocId: '',
+      documentError: null,
+    },
+  ]);
+
   const [existingDocuments, setExistingDocuments] = useState<ExistingDocument[]>([]);
-  const [selectedExistingDocId, setSelectedExistingDocId] = useState<string>('');
-  const [documentError, setDocumentError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Keep guestDocs synchronized with primary guest & additional occupants
+  useEffect(() => {
+    setGuestDocs((prevDocs) => {
+      const nextDocs: GuestDocEntry[] = [];
+
+      // 1. Primary Guest
+      const existingPrimary = prevDocs.find((d) => d.occupantId === 'primary');
+      nextDocs.push({
+        occupantId: 'primary',
+        fullName: `${reservation.primaryGuest.firstName} ${reservation.primaryGuest.lastName}`,
+        isPrimary: true,
+        gender: primaryGender,
+        phone: reservation.primaryGuest.phone || undefined,
+        idDocumentType: existingPrimary?.idDocumentType || IdDocumentType.AADHAAR,
+        idDocumentNumber: existingPrimary?.idDocumentNumber || '',
+        documentFile: existingPrimary?.documentFile || null,
+        documentPreview: existingPrimary?.documentPreview || null,
+        documentUploadState: existingPrimary?.documentUploadState || 'idle',
+        documentStorageRef: existingPrimary?.documentStorageRef || '',
+        documentDataBase64: existingPrimary?.documentDataBase64 || '',
+        documentFileName: existingPrimary?.documentFileName || '',
+        documentMimeType: existingPrimary?.documentMimeType || '',
+        documentFileSize: existingPrimary?.documentFileSize || 0,
+        documentId: existingPrimary?.documentId || '',
+        documentVerificationStatus: existingPrimary?.documentVerificationStatus || 'PENDING',
+        selectedExistingDocId: existingPrimary?.selectedExistingDocId || '',
+        documentError: existingPrimary?.documentError || null,
+      });
+
+      // 2. Additional Occupants
+      for (const occ of additionalOccupants) {
+        const found = prevDocs.find((d) => d.occupantId === occ.id);
+        const name = `${occ.firstName.trim()} ${occ.lastName.trim()}`.trim() || 'Additional Guest';
+        nextDocs.push({
+          occupantId: occ.id,
+          fullName: name,
+          isPrimary: false,
+          gender: occ.gender,
+          phone: occ.phone?.trim() || undefined,
+          idDocumentType: found?.idDocumentType || IdDocumentType.AADHAAR,
+          idDocumentNumber: found?.idDocumentNumber || '',
+          documentFile: found?.documentFile || null,
+          documentPreview: found?.documentPreview || null,
+          documentUploadState: found?.documentUploadState || 'idle',
+          documentStorageRef: found?.documentStorageRef || '',
+          documentDataBase64: found?.documentDataBase64 || '',
+          documentFileName: found?.documentFileName || '',
+          documentMimeType: found?.documentMimeType || '',
+          documentFileSize: found?.documentFileSize || 0,
+          documentId: found?.documentId || '',
+          documentVerificationStatus: found?.documentVerificationStatus || 'PENDING',
+          selectedExistingDocId: found?.selectedExistingDocId || '',
+          documentError: found?.documentError || null,
+        });
+      }
+
+      return nextDocs;
+    });
+  }, [additionalOccupants, primaryGender, reservation.primaryGuest]);
+
+  // Load existing documents for primary guest on file when entering Stage 3 (without auto-selecting)
+  useEffect(() => {
+    if (step === 3 && reservation.primaryGuest.id) {
+      getGuestDocumentsAction(reservation.primaryGuest.id).then((res) => {
+        if (res.success && res.data) {
+          setExistingDocuments(res.data);
+          // Do NOT auto-select or auto-fill existing documents to prevent confusion
+        }
+      });
+    }
+  }, [step, reservation.primaryGuest.id]);
 
   // Stage 4 — Photo state
   const [photoStorageRef, setPhotoStorageRef] = useState<string>('');
@@ -208,46 +323,11 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
   const [additionalDepositMethod, setAdditionalDepositMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [additionalDepositReference, setAdditionalDepositReference] = useState<string>('');
 
-  // Stage 2 & Multi-Guest Occupants state
-  const [primaryGender, setPrimaryGender] = useState<string>('MALE');
-  const [additionalOccupants, setAdditionalOccupants] = useState<
-    Array<{
-      id: string;
-      firstName: string;
-      lastName: string;
-      gender: string;
-      phone: string;
-      idDocumentType: string;
-      idDocumentNumber: string;
-    }>
-  >([]);
-
   // Stage 7 — Notes
   const [notes, setNotes] = useState<string>('');
 
   const selectedRoom = eligibleRooms.find((r) => r.id === selectedRoomId);
-
   const expectedCheckOutDate = reservation.checkOutDate.slice(0, 10);
-
-  // Load existing documents when reaching Stage 3
-  useEffect(() => {
-    if (step === 3 && reservation.primaryGuest.id) {
-      getGuestDocumentsAction(reservation.primaryGuest.id).then((res) => {
-        if (res.success && res.data) {
-          setExistingDocuments(res.data);
-          const pendingDoc = res.data.find((d) => d.verificationStatus === 'PENDING');
-          if (pendingDoc) {
-            setSelectedExistingDocId(pendingDoc.id);
-            setIdDocumentType(pendingDoc.documentType as IdDocumentType);
-            setIdDocumentNumber(pendingDoc.documentNumber);
-            setDocumentStorageRef(pendingDoc.fileUrl);
-            setDocumentId(pendingDoc.id);
-            setDocumentVerificationStatus(pendingDoc.verificationStatus);
-          }
-        }
-      });
-    }
-  }, [step, reservation.primaryGuest.id]);
 
   // Load existing photo when reaching Stage 4
   useEffect(() => {
@@ -262,41 +342,63 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
     }
   }, [step, reservation.primaryGuest.id, photoCaptured]);
 
-  // Document file handling
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // Multi-guest document handlers
+  const handleGuestDocFieldChange = useCallback((occupantId: string, field: 'idDocumentType' | 'idDocumentNumber', value: any) => {
+    setGuestDocs((prev) =>
+      prev.map((g) => (g.occupantId === occupantId ? { ...g, [field]: value } : g))
+    );
+  }, []);
+
+  const handleGuestFileSelect = useCallback((occupantId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setDocumentError(null);
-
     if (!ACCEPTED_MIME_TYPES.includes(file.type)) {
-      setDocumentError('Invalid file type. Accepted: JPG, PNG, PDF');
+      setGuestDocs((prev) =>
+        prev.map((g) => (g.occupantId === occupantId ? { ...g, documentError: 'Invalid file type. Accepted: JPG, PNG, PDF' } : g))
+      );
       return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      setDocumentError('File size exceeds 15MB limit');
+      setGuestDocs((prev) =>
+        prev.map((g) => (g.occupantId === occupantId ? { ...g, documentError: 'File size exceeds 15MB limit' } : g))
+      );
       return;
     }
-
-    setDocumentFile(file);
 
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        setDocumentPreview(ev.target?.result as string);
+        setGuestDocs((prev) =>
+          prev.map((g) =>
+            g.occupantId === occupantId
+              ? { ...g, documentFile: file, documentPreview: ev.target?.result as string, documentError: null }
+              : g
+          )
+        );
       };
       reader.readAsDataURL(file);
     } else {
-      setDocumentPreview(null);
+      setGuestDocs((prev) =>
+        prev.map((g) =>
+          g.occupantId === occupantId
+            ? { ...g, documentFile: file, documentPreview: null, documentError: null }
+            : g
+        )
+      );
     }
   }, []);
 
-  const handleDocumentUpload = useCallback(async () => {
-    if (!documentFile || !idDocumentNumber || idDocumentNumber.trim().length < 3) return;
+  const handleGuestDocUpload = useCallback(async (occupantId: string) => {
+    const targetGuest = guestDocs.find((g) => g.occupantId === occupantId);
+    if (!targetGuest || !targetGuest.documentFile || !targetGuest.idDocumentNumber || targetGuest.idDocumentNumber.trim().length < 3) {
+      return;
+    }
 
-    setDocumentUploadState('uploading');
-    setDocumentError(null);
+    setGuestDocs((prev) =>
+      prev.map((g) => (g.occupantId === occupantId ? { ...g, documentUploadState: 'uploading', documentError: null } : g))
+    );
 
     try {
       const reader = new FileReader();
@@ -308,71 +410,128 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
         };
         reader.onerror = reject;
       });
-      reader.readAsDataURL(documentFile);
+      reader.readAsDataURL(targetGuest.documentFile);
       const fileBase64 = await base64Promise;
 
       const formData = new FormData();
       formData.append('guestId', reservation.primaryGuest.id);
-      formData.append('documentType', idDocumentType);
-      formData.append('documentNumber', idDocumentNumber);
+      formData.append('documentType', targetGuest.idDocumentType);
+      formData.append('documentNumber', targetGuest.idDocumentNumber);
       formData.append('fileBase64', fileBase64);
-      formData.append('fileName', documentFile.name);
-      formData.append('mimeType', documentFile.type);
-      if (selectedExistingDocId) {
-        formData.append('existingDocumentId', selectedExistingDocId);
+      formData.append('fileName', targetGuest.documentFile.name);
+      formData.append('mimeType', targetGuest.documentFile.type);
+      if (targetGuest.selectedExistingDocId) {
+        formData.append('existingDocumentId', targetGuest.selectedExistingDocId);
       }
 
       const result = await uploadGuestDocumentAction(null, formData);
 
       if (result.success && result.data) {
-        setDocumentStorageRef(result.data.storageRef);
-        setDocumentId(result.data.documentId);
-        setDocumentDataBase64(fileBase64);
-        setDocumentFileName(documentFile.name);
-        setDocumentMimeType(documentFile.type);
-        setDocumentFileSize(documentFile.size);
-        setDocumentVerificationStatus('PENDING');
-        setDocumentUploadState('success');
-        if (!selectedExistingDocId) {
-          setSelectedExistingDocId(result.data.documentId);
-        }
+        setGuestDocs((prev) =>
+          prev.map((g) =>
+            g.occupantId === occupantId
+              ? {
+                  ...g,
+                  documentStorageRef: result.data!.storageRef,
+                  documentId: result.data!.documentId,
+                  documentDataBase64: fileBase64,
+                  documentFileName: targetGuest.documentFile!.name,
+                  documentMimeType: targetGuest.documentFile!.type,
+                  documentFileSize: targetGuest.documentFile!.size,
+                  documentVerificationStatus: 'PENDING',
+                  documentUploadState: 'success',
+                  selectedExistingDocId: g.selectedExistingDocId || result.data!.documentId,
+                  documentError: null,
+                }
+              : g
+          )
+        );
       } else {
-        setDocumentError(result.error || 'Upload failed');
-        setDocumentUploadState('error');
+        setGuestDocs((prev) =>
+          prev.map((g) =>
+            g.occupantId === occupantId
+              ? { ...g, documentUploadState: 'error', documentError: result.error || 'Upload failed' }
+              : g
+          )
+        );
       }
     } catch (err) {
-      setDocumentError('Upload failed. Please try again.');
-      setDocumentUploadState('error');
+      setGuestDocs((prev) =>
+        prev.map((g) =>
+          g.occupantId === occupantId
+            ? { ...g, documentUploadState: 'error', documentError: 'Upload failed. Please try again.' }
+            : g
+        )
+      );
     }
-  }, [documentFile, idDocumentType, idDocumentNumber, reservation.primaryGuest.id, selectedExistingDocId]);
+  }, [guestDocs, reservation.primaryGuest.id]);
 
-  const handleDocumentVerification = useCallback(async (status: 'VERIFIED' | 'REJECTED') => {
-    if (!documentId) return;
+  const handleGuestDocVerification = useCallback(async (occupantId: string, status: 'VERIFIED' | 'REJECTED') => {
+    const targetGuest = guestDocs.find((g) => g.occupantId === occupantId);
+    if (!targetGuest || !targetGuest.documentId) return;
 
     const formData = new FormData();
-    formData.append('documentId', documentId);
+    formData.append('documentId', targetGuest.documentId);
     formData.append('verificationStatus', status);
 
     const result = await verifyGuestDocumentAction(null, formData);
 
     if (result.success && result.data) {
-      setDocumentVerificationStatus(result.data.status);
+      setGuestDocs((prev) =>
+        prev.map((g) =>
+          g.occupantId === occupantId ? { ...g, documentVerificationStatus: result.data!.status as any } : g
+        )
+      );
     } else {
-      setDocumentError(result.error || 'Verification failed');
+      setGuestDocs((prev) =>
+        prev.map((g) =>
+          g.occupantId === occupantId ? { ...g, documentError: result.error || 'Verification failed' } : g
+        )
+      );
     }
-  }, [documentId]);
+  }, [guestDocs]);
 
-  const handleRemoveDocument = useCallback(() => {
-    setDocumentFile(null);
-    setDocumentPreview(null);
-    setDocumentStorageRef('');
-    setDocumentId('');
-    setDocumentVerificationStatus('PENDING');
-    setDocumentUploadState('idle');
-    setSelectedExistingDocId('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+  const handleRemoveGuestDoc = useCallback((occupantId: string) => {
+    setGuestDocs((prev) =>
+      prev.map((g) =>
+        g.occupantId === occupantId
+          ? {
+              ...g,
+              documentFile: null,
+              documentPreview: null,
+              documentStorageRef: '',
+              documentId: '',
+              documentVerificationStatus: 'PENDING',
+              documentUploadState: 'idle',
+              selectedExistingDocId: '',
+              documentDataBase64: '',
+              documentFileName: '',
+              documentMimeType: '',
+              documentFileSize: 0,
+              documentError: null,
+            }
+          : g
+      )
+    );
+  }, []);
+
+  const handleSelectExistingDoc = useCallback((doc: ExistingDocument) => {
+    setGuestDocs((prev) =>
+      prev.map((g) =>
+        g.isPrimary
+          ? {
+              ...g,
+              selectedExistingDocId: doc.id,
+              idDocumentType: doc.documentType as IdDocumentType,
+              idDocumentNumber: doc.documentNumber,
+              documentStorageRef: doc.fileUrl,
+              documentId: doc.id,
+              documentVerificationStatus: doc.verificationStatus as any,
+              documentError: null,
+            }
+          : g
+      )
+    );
   }, []);
 
   const handlePhotoCapture = useCallback(async (base64: string) => {
@@ -403,49 +562,57 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
     setError(null);
     setLoading(true);
 
+    const primaryDoc = guestDocs.find((g) => g.isPrimary) || guestDocs[0];
+
     const formData = new FormData();
     formData.append('reservationId', reservation.id);
     formData.append('roomId', selectedRoomId);
     formData.append('expectedCheckOut', expectedCheckOutDate);
-    formData.append('idDocumentType', idDocumentType);
-    formData.append('idDocumentNumber', idDocumentNumber);
+    formData.append('idDocumentType', primaryDoc?.idDocumentType || IdDocumentType.AADHAAR);
+    formData.append('idDocumentNumber', primaryDoc?.idDocumentNumber || '');
     formData.append('gender', primaryGender);
 
-    // Build authoritative occupants payload
+    // Build authoritative occupants payload with individual documents
     const primaryOccupant = {
       firstName: reservation.primaryGuest.firstName,
       lastName: reservation.primaryGuest.lastName,
       gender: primaryGender,
       phone: reservation.primaryGuest.phone || undefined,
       email: reservation.primaryGuest.email || undefined,
-      idDocumentType,
-      idDocumentNumber,
-      documentStorageRef: documentStorageRef || undefined,
-      documentFileName: documentFileName || undefined,
-      documentMimeType: documentMimeType || undefined,
-      documentFileSize: documentFileSize || undefined,
+      idDocumentType: primaryDoc?.idDocumentType || IdDocumentType.AADHAAR,
+      idDocumentNumber: primaryDoc?.idDocumentNumber || '',
+      documentStorageRef: primaryDoc?.documentStorageRef || undefined,
+      documentFileName: primaryDoc?.documentFileName || undefined,
+      documentMimeType: primaryDoc?.documentMimeType || undefined,
+      documentFileSize: primaryDoc?.documentFileSize || undefined,
       isPrimary: true,
     };
 
-    const allOccupants = [
-      primaryOccupant,
-      ...additionalOccupants.map((occ) => ({
+    const accompanyingOccupants = additionalOccupants.map((occ) => {
+      const doc = guestDocs.find((g) => g.occupantId === occ.id);
+      return {
         firstName: occ.firstName.trim(),
         lastName: occ.lastName.trim(),
         gender: occ.gender,
         phone: occ.phone?.trim() || undefined,
-        idDocumentType: occ.idDocumentType,
-        idDocumentNumber: occ.idDocumentNumber.trim(),
+        idDocumentType: doc?.idDocumentType || IdDocumentType.AADHAAR,
+        idDocumentNumber: doc?.idDocumentNumber?.trim() || '',
+        documentStorageRef: doc?.documentStorageRef || undefined,
+        documentFileName: doc?.documentFileName || undefined,
+        documentMimeType: doc?.documentMimeType || undefined,
+        documentFileSize: doc?.documentFileSize || undefined,
         isPrimary: false,
-      })),
-    ];
+      };
+    });
+
+    const allOccupants = [primaryOccupant, ...accompanyingOccupants];
 
     formData.append('occupants', JSON.stringify(allOccupants));
 
-    if (documentStorageRef) formData.append('documentStorageRef', documentStorageRef);
-    if (documentFileName) formData.append('documentFileName', documentFileName);
-    if (documentMimeType) formData.append('documentMimeType', documentMimeType);
-    if (documentFileSize) formData.append('documentFileSize', documentFileSize.toString());
+    if (primaryDoc?.documentStorageRef) formData.append('documentStorageRef', primaryDoc.documentStorageRef);
+    if (primaryDoc?.documentFileName) formData.append('documentFileName', primaryDoc.documentFileName);
+    if (primaryDoc?.documentMimeType) formData.append('documentMimeType', primaryDoc.documentMimeType);
+    if (primaryDoc?.documentFileSize) formData.append('documentFileSize', primaryDoc.documentFileSize.toString());
     if (photoStorageRef) formData.append('photoStorageRef', photoStorageRef);
     if (photoMimeType) formData.append('photoMimeType', photoMimeType);
     if (notes) formData.append('notes', notes);
@@ -467,7 +634,12 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
     }
   };
 
-  const canAdvanceFromStage3 = idDocumentNumber.trim().length >= 3 && documentStorageRef !== '' && documentVerificationStatus === 'VERIFIED';
+  // Stage 3 advancing rule: All entered guests must have valid ID document number (>= 3 chars)
+  // And primary guest must have document storage ref and verification status
+  const primaryDoc = guestDocs.find((g) => g.isPrimary);
+  const allGuestsHaveDocNumbers = guestDocs.every((g) => g.idDocumentNumber.trim().length >= 3);
+  const primaryDocVerified = primaryDoc ? (primaryDoc.documentStorageRef !== '' && primaryDoc.documentVerificationStatus === 'VERIFIED') : false;
+  const canAdvanceFromStage3 = allGuestsHaveDocNumbers && primaryDocVerified;
   const canAdvanceFromStage4 = true;
   const canAdvanceFromStage5 = selectedRoomId !== '';
 
@@ -664,8 +836,6 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                         lastName: '',
                         gender: 'FEMALE',
                         phone: '',
-                        idDocumentType: 'AADHAAR',
-                        idDocumentNumber: '',
                       },
                     ]);
                   }}
@@ -698,7 +868,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                           Remove
                         </Button>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <div>
                           <Label className="text-[10px]">First Name *</Label>
                           <Input
@@ -709,6 +879,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                                 additionalOccupants.map((o) => (o.id === occ.id ? { ...o, firstName: val } : o))
                               );
                             }}
+                            placeholder="First Name"
                             required
                             className="h-7 text-xs"
                           />
@@ -723,6 +894,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                                 additionalOccupants.map((o) => (o.id === occ.id ? { ...o, lastName: val } : o))
                               );
                             }}
+                            placeholder="Last Name"
                             required
                             className="h-7 text-xs"
                           />
@@ -745,38 +917,6 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                           </select>
                         </div>
                         <div>
-                          <Label className="text-[10px]">ID Type *</Label>
-                          <select
-                            value={occ.idDocumentType}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setAdditionalOccupants(
-                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, idDocumentType: val } : o))
-                              );
-                            }}
-                            className="w-full h-7 rounded border border-neutral-300 bg-white px-2 text-xs"
-                          >
-                            {ALLOWED_DOC_TYPES.map((dt) => (
-                              <option key={dt.value} value={dt.value}>{dt.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <Label className="text-[10px]">ID Number *</Label>
-                          <Input
-                            value={occ.idDocumentNumber}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setAdditionalOccupants(
-                                additionalOccupants.map((o) => (o.id === occ.id ? { ...o, idDocumentNumber: val } : o))
-                              );
-                            }}
-                            placeholder="Min 3 chars"
-                            required
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div>
                           <Label className="text-[10px]">Phone (Optional)</Label>
                           <Input
                             value={occ.phone}
@@ -786,6 +926,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                                 additionalOccupants.map((o) => (o.id === occ.id ? { ...o, phone: val } : o))
                               );
                             }}
+                            placeholder="Phone number"
                             className="h-7 text-xs"
                           />
                         </div>
@@ -803,7 +944,7 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
             <Button
               type="button"
               onClick={() => {
-                // Validate that all additional occupants have required fields
+                // Validate that all additional occupants have required names & gender
                 for (const occ of additionalOccupants) {
                   if (!occ.firstName.trim() || !occ.lastName.trim()) {
                     setError('All occupants must have a first and last name.');
@@ -811,10 +952,6 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                   }
                   if (!occ.gender.trim()) {
                     setError('All occupants must have a gender specified.');
-                    return;
-                  }
-                  if (!occ.idDocumentNumber.trim() || occ.idDocumentNumber.trim().length < 3) {
-                    setError('All occupants must have a valid ID document number (min 3 characters).');
                     return;
                   }
                 }
@@ -833,193 +970,251 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
       {step === 3 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base flex items-center">
-              <FileText className="w-5 h-5 mr-2 text-resort-gold" /> Stage 3: Guest ID Document Verification
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center">
+                <FileText className="w-5 h-5 mr-2 text-resort-gold" /> Stage 3: Guest ID Document Verification
+              </span>
+              <Badge variant="outline" className="text-xs font-normal">
+                {guestDocs.length} Guest{guestDocs.length > 1 ? 's' : ''} to verify
+              </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-xs">
-            {/* Document Type Selector */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="idDocumentType" className="text-xs">ID Document Type</Label>
-                <select
-                  id="idDocumentType"
-                  value={idDocumentType}
-                  onChange={(e) => setIdDocumentType(e.target.value as IdDocumentType)}
-                  className="w-full h-9 rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-neutral-900"
-                >
-                  {ALLOWED_DOC_TYPES.map((dt) => (
-                    <option key={dt.value} value={dt.value}>{dt.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="idDocumentNumber" className="text-xs">Document Number</Label>
-                <Input
-                  id="idDocumentNumber"
-                  placeholder="e.g. ABCDE1234F"
-                  value={idDocumentNumber}
-                  onChange={(e) => setIdDocumentNumber(e.target.value)}
-                  className="text-xs"
-                />
-              </div>
+          <CardContent className="space-y-6 text-xs">
+            <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-lg text-blue-900 text-xs">
+              Every guest must have their ID Document Type and Document Number recorded. Documents can be uploaded for secure digital archiving and immediate verification.
             </div>
 
-            {/* Document Upload */}
-            <div className="space-y-2">
-              <Label className="text-xs">Upload ID Document</Label>
-
-              {documentFile ? (
-                <div className="flex items-center gap-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                  {documentPreview ? (
-                    <div className="w-16 h-16 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
-                      <img src={documentPreview} alt="Document preview" className="w-full h-full object-cover" />
+            {/* Render a dedicated ID card for EACH guest */}
+            <div className="space-y-5">
+              {guestDocs.map((guest, gIdx) => (
+                <div
+                  key={guest.occupantId}
+                  className="p-4 bg-neutral-50 rounded-xl border border-neutral-200 space-y-4"
+                >
+                  {/* Guest Header */}
+                  <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-resort-charcoal text-white flex items-center justify-center text-[11px] font-bold">
+                        {gIdx + 1}
+                      </span>
+                      <span className="font-semibold text-neutral-900 text-sm">
+                        {guest.fullName}
+                      </span>
+                      <Badge
+                        variant={guest.isPrimary ? 'success' : 'outline'}
+                        className="text-[10px]"
+                      >
+                        {guest.isPrimary ? 'Primary Guest' : `Occupant #${gIdx + 1}`}
+                      </Badge>
                     </div>
-                  ) : (
-                    <div className="w-16 h-16 rounded bg-neutral-200 flex items-center justify-center flex-shrink-0">
-                      <File className="w-8 h-8 text-neutral-400" />
+                    {guest.phone && (
+                      <span className="text-[11px] text-neutral-500 font-mono">
+                        {guest.phone}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Document Type & Number */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">ID Document Type *</Label>
+                      <select
+                        value={guest.idDocumentType}
+                        onChange={(e) =>
+                          handleGuestDocFieldChange(guest.occupantId, 'idDocumentType', e.target.value as IdDocumentType)
+                        }
+                        className="w-full h-8 rounded-md border border-neutral-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                      >
+                        {ALLOWED_DOC_TYPES.map((dt) => (
+                          <option key={dt.value} value={dt.value}>{dt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Document Number *</Label>
+                      <Input
+                        placeholder="e.g. 1234 5678 9012 or ABCDE1234F"
+                        value={guest.idDocumentNumber}
+                        onChange={(e) =>
+                          handleGuestDocFieldChange(guest.occupantId, 'idDocumentNumber', e.target.value)
+                        }
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Document File Uploader */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-neutral-700">Upload ID Document Proof</Label>
+
+                    {guest.documentFile ? (
+                      <div className="flex items-center gap-3 p-3 bg-white border border-neutral-200 rounded-lg">
+                        {guest.documentPreview ? (
+                          <div className="w-14 h-14 rounded overflow-hidden bg-neutral-100 flex-shrink-0 border border-neutral-200">
+                            <img src={guest.documentPreview} alt="Document preview" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded bg-neutral-100 flex items-center justify-center flex-shrink-0 border border-neutral-200">
+                            <File className="w-6 h-6 text-neutral-400" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-neutral-900 truncate">{guest.documentFile.name}</p>
+                          <p className="text-[11px] text-neutral-500">{formatFileSize(guest.documentFile.size)}</p>
+                          {guest.documentUploadState === 'uploading' && (
+                            <p className="text-[11px] text-blue-600 flex items-center gap-1 mt-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Uploading to vault...
+                            </p>
+                          )}
+                          {guest.documentUploadState === 'success' && (
+                            <p className="text-[11px] text-emerald-600 flex items-center gap-1 mt-1">
+                              <Check className="w-3 h-3" /> Uploaded successfully
+                            </p>
+                          )}
+                          {guest.documentUploadState === 'error' && guest.documentError && (
+                            <p className="text-[11px] text-red-600 mt-1">{guest.documentError}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-1.5">
+                          {guest.documentUploadState !== 'uploading' && !guest.documentStorageRef && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={!guest.idDocumentNumber || guest.idDocumentNumber.trim().length < 3}
+                              onClick={() => handleGuestDocUpload(guest.occupantId)}
+                            >
+                              <Upload className="w-3 h-3 mr-1" /> Upload
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-neutral-500 hover:text-neutral-700"
+                            onClick={() => handleRemoveGuestDoc(guest.occupantId)}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          id={`file-input-${guest.occupantId}`}
+                          type="file"
+                          accept=".jpg,.jpeg,.png,.pdf"
+                          onChange={(e) => handleGuestFileSelect(guest.occupantId, e)}
+                          className="hidden"
+                        />
+                        <div
+                          className="border-2 border-dashed border-neutral-300 rounded-lg p-4 text-center cursor-pointer hover:border-neutral-400 bg-white transition-colors"
+                          onClick={() => document.getElementById(`file-input-${guest.occupantId}`)?.click()}
+                        >
+                          <Upload className="w-5 h-5 mx-auto mb-1 text-neutral-400" />
+                          <p className="text-neutral-700 text-xs font-medium">Click to choose document proof for {guest.fullName}</p>
+                          <p className="text-neutral-400 text-[10px] mt-0.5">JPG, PNG, or PDF — Max 15MB</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {guest.documentError && !guest.documentFile && (
+                      <p className="text-[11px] text-red-600">{guest.documentError}</p>
+                    )}
+                  </div>
+
+                  {/* Verification Status Banner & Actions */}
+                  {guest.documentId && (
+                    <div className="p-3 bg-white rounded-lg border border-neutral-200 space-y-2">
+                      {guest.documentVerificationStatus === 'VERIFIED' && (
+                        <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 p-2 rounded">
+                          <Shield className="w-4 h-4" />
+                          <span className="font-medium">Document Verified for {guest.fullName}</span>
+                        </div>
+                      )}
+                      {guest.documentVerificationStatus === 'REJECTED' && (
+                        <div className="flex items-center gap-2 text-red-700 bg-red-50 p-2 rounded">
+                          <AlertCircle className="w-4 h-4" />
+                          <span className="font-medium">Document Rejected</span>
+                        </div>
+                      )}
+                      {guest.documentVerificationStatus === 'PENDING' && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-amber-700 bg-amber-50 p-2 rounded">
+                            <AlertCircle className="w-4 h-4" />
+                            <span className="font-medium">Uploaded — pending front desk verification</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleGuestDocVerification(guest.occupantId, 'VERIFIED')}
+                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-7 text-xs"
+                            >
+                              <Check className="w-3 h-3 mr-1" /> Verify ID
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleGuestDocVerification(guest.occupantId, 'REJECTED')}
+                              className="text-red-700 border-red-300 hover:bg-red-50 h-7 text-xs"
+                            >
+                              <X className="w-3 h-3 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-neutral-900 truncate">{documentFile.name}</p>
-                    <p className="text-[11px] text-neutral-500">{formatFileSize(documentFile.size)}</p>
-                    {documentUploadState === 'uploading' && (
-                      <p className="text-[11px] text-blue-600 flex items-center gap-1 mt-1">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
-                      </p>
-                    )}
-                    {documentUploadState === 'success' && (
-                      <p className="text-[11px] text-emerald-600 flex items-center gap-1 mt-1">
-                        <Check className="w-3 h-3" /> Uploaded successfully
-                      </p>
-                    )}
-                    {documentUploadState === 'error' && documentError && (
-                      <p className="text-[11px] text-red-600 mt-1">{documentError}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-1">
-                    {documentUploadState !== 'uploading' && (
-                      <Button type="button" variant="outline" size="sm" onClick={handleDocumentUpload}>
-                        <Upload className="w-3 h-3 mr-1" /> Upload
-                      </Button>
-                    )}
-                    <Button type="button" variant="outline" size="sm" onClick={handleRemoveDocument}>
-                      <X className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="border-2 border-dashed border-neutral-300 rounded-lg p-6 text-center cursor-pointer hover:border-neutral-400 transition-colors"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="w-8 h-8 mx-auto mb-2 text-neutral-400" />
-                  <p className="text-neutral-600 text-xs">Click to select document file</p>
-                  <p className="text-neutral-400 text-[10px] mt-1">JPG, PNG, or PDF — Max 15MB</p>
-                </div>
-              )}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".jpg,.jpeg,.png,.pdf"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-
-              {documentError && !documentFile && (
-                <p className="text-[11px] text-red-600">{documentError}</p>
-              )}
+                  {/* Optional: Show existing documents on file only for Primary Guest if available */}
+                  {guest.isPrimary && existingDocuments.length > 0 && !guest.documentFile && (
+                    <div className="space-y-2 pt-2 border-t border-neutral-200">
+                      <Label className="text-xs text-neutral-500 font-medium">
+                        Existing Documents on File (Primary Guest)
+                      </Label>
+                      <div className="space-y-1.5">
+                        {existingDocuments.map((doc) => (
+                          <div
+                            key={doc.id}
+                            className={`p-2.5 bg-white border rounded-lg text-xs cursor-pointer transition-colors ${
+                              guest.selectedExistingDocId === doc.id
+                                ? 'border-neutral-900 ring-1 ring-neutral-900'
+                                : 'border-neutral-200 hover:border-neutral-400'
+                            }`}
+                            onClick={() => handleSelectExistingDoc(doc)}
+                          >
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <span className="font-medium">{doc.documentType.replace('_', ' ')}</span>
+                                <span className="ml-2 font-mono text-neutral-600">{doc.documentNumber}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                                  doc.verificationStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-700' :
+                                  doc.verificationStatus === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                                  'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {doc.verificationStatus}
+                                </span>
+                                <span className="text-[10px] text-neutral-400">Click to use</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
-            {/* Verification Status */}
-            {documentId && (
-              <div className="p-3 rounded-lg border text-xs space-y-2">
-                {documentVerificationStatus === 'VERIFIED' && (
-                  <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 p-2 rounded">
-                    <Shield className="w-4 h-4" />
-                    <span className="font-medium">Document Verified</span>
-                  </div>
-                )}
-                {documentVerificationStatus === 'REJECTED' && (
-                  <div className="flex items-center gap-2 text-red-700 bg-red-50 p-2 rounded">
-                    <AlertCircle className="w-4 h-4" />
-                    <span className="font-medium">Document Rejected</span>
-                  </div>
-                )}
-                {documentVerificationStatus === 'PENDING' && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-amber-700 bg-amber-50 p-2 rounded">
-                      <AlertCircle className="w-4 h-4" />
-                      <span className="font-medium">Document uploaded — pending verification</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDocumentVerification('VERIFIED')}
-                        className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                      >
-                        <Check className="w-3 h-3 mr-1" /> Verify
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDocumentVerification('REJECTED')}
-                        className="text-red-700 border-red-300 hover:bg-red-50"
-                      >
-                        <X className="w-3 h-3 mr-1" /> Reject
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Existing Documents */}
-            {existingDocuments.length > 0 && !documentFile && (
-              <div className="space-y-2">
-                <Label className="text-xs text-neutral-500">Existing Documents on File</Label>
-                {existingDocuments.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className={`p-2 border rounded-lg text-xs cursor-pointer transition-colors ${
-                      selectedExistingDocId === doc.id
-                        ? 'border-neutral-900 bg-neutral-50'
-                        : 'border-neutral-200 hover:border-neutral-400'
-                    }`}
-                    onClick={() => {
-                      setSelectedExistingDocId(doc.id);
-                      setIdDocumentType(doc.documentType as IdDocumentType);
-                      setIdDocumentNumber(doc.documentNumber);
-                      setDocumentStorageRef(doc.fileUrl);
-                      setDocumentId(doc.id);
-                      setDocumentVerificationStatus(doc.verificationStatus);
-                    }}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <span className="font-medium">{doc.documentType.replace('_', ' ')}</span>
-                        <span className="ml-2 text-neutral-500">{doc.documentNumber}</span>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded ${
-                        doc.verificationStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-700' :
-                        doc.verificationStatus === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
-                      }`}>
-                        {doc.verificationStatus}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
             <p className="text-[11px] text-neutral-500">
-              Document numbers and upload references are audited. Access requires restricted permission.
+              Document numbers and upload references are securely audited. Primary guest document must be verified before proceeding to photo capture.
             </p>
           </CardContent>
           <CardFooter className="flex justify-between">
@@ -1314,68 +1509,85 @@ export function CheckInWizard({ reservation, eligibleRooms }: CheckInWizardProps
                 )}
               </div>
 
-              {/* ID Document */}
-              <div className="p-4 bg-neutral-50 rounded-lg border border-neutral-200 space-y-2">
-                <h4 className="font-semibold text-neutral-900 flex items-center gap-1">
-                  <FileText className="w-3.5 h-3.5" /> ID Document
+              {/* ID Documents Summary for All Guests */}
+              <div className="p-4 bg-neutral-50 rounded-lg border border-neutral-200 space-y-3">
+                <h4 className="font-semibold text-neutral-900 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" /> Guest ID Documents ({guestDocs.length})
+                  </span>
+                  <Badge variant="outline" className="text-[10px]">Audited</Badge>
                 </h4>
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Type</span>
-                    <span className="font-medium">{idDocumentType.replace('_', ' ')}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Number</span>
-                    <span className="font-mono">{maskDocumentNumber(idDocumentType, idDocumentNumber)}</span>
-                  </div>
-                  {documentFile && (
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">File</span>
-                      <span className="truncate max-w-[120px]">{documentFile.name}</span>
+                <div className="space-y-2">
+                  {guestDocs.map((g) => (
+                    <div key={g.occupantId} className="p-2 bg-white rounded border border-neutral-200 space-y-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-medium text-neutral-900">
+                          {g.fullName} {g.isPrimary && <span className="text-neutral-500 font-normal">(Primary)</span>}
+                        </span>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          g.documentVerificationStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-700' :
+                          g.documentVerificationStatus === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                          'bg-amber-100 text-amber-700'
+                        }`}>
+                          {g.documentVerificationStatus}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px] text-neutral-600 font-mono">
+                        <span>{g.idDocumentType.replace('_', ' ')}</span>
+                        <span>{maskDocumentNumber(g.idDocumentType, g.idDocumentNumber)}</span>
+                      </div>
+                      {g.documentFileName && (
+                        <div className="flex justify-between text-[10px] text-neutral-500 truncate">
+                          <span>File: {g.documentFileName}</span>
+                          {g.documentFileSize > 0 && <span>{formatFileSize(g.documentFileSize)}</span>}
+                        </div>
+                      )}
+                      {g.documentId && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => window.open(`/api/secure-media/guest-document/${g.documentId}`, '_blank')}
+                          className="h-5 text-[10px] p-0 text-blue-600 hover:text-blue-800"
+                        >
+                          <Eye className="w-3 h-3 mr-1" /> View ID Document
+                        </Button>
+                      )}
                     </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Status</span>
-                    <span className={`font-medium ${
-                      documentVerificationStatus === 'VERIFIED' ? 'text-emerald-700' :
-                      documentVerificationStatus === 'REJECTED' ? 'text-red-700' :
-                      'text-amber-700'
-                    }`}>
-                      {documentVerificationStatus}
-                    </span>
-                  </div>
+                  ))}
                 </div>
-                {documentId && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(`/api/secure-media/guest-document/${documentId}`, '_blank')}
-                    className="mt-2 w-full text-xs"
-                  >
-                    <Eye className="w-3 h-3 mr-1" /> View ID Document
-                  </Button>
-                )}
               </div>
 
-              {/* Guest Details */}
+              {/* Guest & Occupants Details */}
               <div className="p-4 bg-neutral-50 rounded-lg border border-neutral-200 space-y-2">
-                <h4 className="font-semibold text-neutral-900 flex items-center gap-1">
-                  <UserCheck className="w-3.5 h-3.5" /> Guest Details
+                <h4 className="font-semibold text-neutral-900 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <UserCheck className="w-3.5 h-3.5" /> All Occupants ({guestDocs.length})
+                  </span>
                 </h4>
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Name</span>
-                    <span className="font-medium">{reservation.primaryGuest.firstName} {reservation.primaryGuest.lastName}</span>
+                <div className="space-y-2">
+                  <div className="p-2 bg-white rounded border border-neutral-200 space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-neutral-900">{reservation.primaryGuest.firstName} {reservation.primaryGuest.lastName}</span>
+                      <Badge variant="success" className="text-[10px]">Primary</Badge>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-neutral-500">
+                      <span>Phone: {reservation.primaryGuest.phone || 'N/A'}</span>
+                      <span>Gender: {primaryGender}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Phone</span>
-                    <span className="font-mono">{reservation.primaryGuest.phone || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-500">Email</span>
-                    <span className="truncate max-w-[150px]">{reservation.primaryGuest.email || 'N/A'}</span>
-                  </div>
+                  {additionalOccupants.map((occ, oIdx) => (
+                    <div key={occ.id} className="p-2 bg-white rounded border border-neutral-200 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="font-medium text-neutral-900">{occ.firstName} {occ.lastName}</span>
+                        <Badge variant="outline" className="text-[10px]">Occupant #{oIdx + 2}</Badge>
+                      </div>
+                      <div className="flex justify-between text-[11px] text-neutral-500">
+                        <span>Phone: {occ.phone || 'Not provided'}</span>
+                        <span>Gender: {occ.gender}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

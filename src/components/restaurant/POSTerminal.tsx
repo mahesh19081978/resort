@@ -395,7 +395,7 @@ export function POSTerminal({
                   {formatCurrency(item.price)}
                 </span>
                 <span className="text-[10px] text-resort-stone bg-resort-sand/30 px-1.5 py-0.5 rounded">
-                  +5% GST
+                  +{item.taxRate}% GST
                 </span>
               </div>
             </div>
@@ -528,7 +528,7 @@ export function POSTerminal({
                 <span>{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex justify-between text-resort-stone">
-                <span>Estimated GST (5%)</span>
+                <span>Taxes & GST</span>
                 <span>{formatCurrency(taxTotal)}</span>
               </div>
               <div className="flex justify-between text-sm font-bold text-resort-charcoal border-t border-resort-sand pt-1.5">

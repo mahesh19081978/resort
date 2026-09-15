@@ -30,6 +30,7 @@ import { getEligibleRoomsForCheckIn } from '@/lib/frontdesk/eligibility';
 import { getInHouseRooms, InHouseFilter, InHouseRoomCard } from '@/lib/frontdesk/inhouse';
 import { executePostServiceCharge, PostChargeResult } from '@/lib/frontdesk/post-charge';
 import { getStayBillData, issueInvoice, BillSummary } from '@/lib/frontdesk/bill';
+import { getStayDetail, StayDetailData } from '@/lib/guest-db/stay-detail';
 import { FolioItemType, PaymentStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { getTaxRateByCode } from '@/lib/db/tax';
 import crypto from 'crypto';
@@ -1497,3 +1498,24 @@ export async function transferPrimaryGuestAction(
   }
 }
 
+// ----------------------------------------------------
+// 22. GET STAY DETAIL (FOR IN-HOUSE GUEST MODAL)
+// Permission: 'guest:read'
+// ----------------------------------------------------
+export async function getStayDetailAction(
+  stayId: string
+): Promise<ActionResponse<StayDetailData>> {
+  try {
+    await requirePermission('guest:read');
+    const data = await getStayDetail(stayId);
+    if (!data) {
+      return { success: false, error: 'Stay record not found' };
+    }
+    return { success: true, data };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to load stay details',
+    };
+  }
+}
