@@ -881,6 +881,21 @@ async function main() {
     },
   });
 
+  // 9. INVOICE CONFIGURATION (SINGLETON)
+  console.log('  -> Seeding Invoice Configuration Singleton...');
+  await prisma.invoiceConfig.upsert({
+    where: { singletonKey: 'DEFAULT' },
+    update: {},
+    create: {
+      singletonKey: 'DEFAULT',
+      prefix: 'INV',
+      termsAndConditions: 'Thank you for choosing Infinity Resort & Restaurant. Payment is due upon checkout.',
+      footerNote: 'Computer generated invoice. Subject to resort jurisdiction.',
+      showTaxBreakdown: true,
+      showPaymentHistory: true,
+    },
+  });
+
   console.log('✅ Seed completed successfully with enterprise baseline data!');
 }
 

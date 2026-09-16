@@ -647,11 +647,20 @@ export async function saveCancellationPolicyAction(input: unknown): Promise<Sett
 export async function getInvoiceConfigAction(): Promise<SettingsActionResult<any>> {
   try {
     await requirePermission('settings:invoice:view');
-    const config = await prisma.invoiceConfig.findUnique({
+    let config = await prisma.invoiceConfig.findUnique({
       where: { singletonKey: 'DEFAULT' },
     });
     if (!config) {
-      return { success: false, error: 'INVOICE_CONFIG_NOT_SEEDED: Run seed-invoice-config script.' };
+      config = await prisma.invoiceConfig.create({
+        data: {
+          singletonKey: 'DEFAULT',
+          prefix: 'INV',
+          termsAndConditions: 'Thank you for choosing Infinity Resort & Restaurant. Payment is due upon checkout.',
+          footerNote: 'Computer generated invoice. Subject to resort jurisdiction.',
+          showTaxBreakdown: true,
+          showPaymentHistory: true,
+        },
+      });
     }
     return { success: true, data: config };
   } catch (error) {
