@@ -15,12 +15,13 @@ import { cn } from '@/lib/utils';
 
 const RESTAURANT_TABS = [
   { href: '/admin/restaurant', label: 'Overview', icon: UtensilsCrossed, exact: true },
-  { href: '/admin/restaurant/tables', label: 'Tables & Floor', icon: LayoutGrid },
+  { href: '/admin/restaurant/tables', label: 'Tables & Sitting Areas', icon: LayoutGrid },
   { href: '/admin/restaurant/pos', label: 'POS Terminal', icon: Laptop },
   { href: '/admin/restaurant/kitchen', label: 'Kitchen Display (KDS)', icon: ChefHat },
   { href: '/admin/restaurant/orders', label: 'Orders & KOT', icon: ClipboardList },
   { href: '/admin/restaurant/bills', label: 'Billing & Settle', icon: Receipt },
-  { href: '/admin/restaurant/menu', label: 'Menu & Recipes', icon: BookOpen },
+  { href: '/admin/restaurant/menu', label: 'Menu Catalog', icon: BookOpen },
+  { href: '/admin/restaurant/recipes', label: 'Recipe BOM', icon: ChefHat },
 ];
 
 export function RestaurantHeader({

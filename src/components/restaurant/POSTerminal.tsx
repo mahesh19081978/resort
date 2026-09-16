@@ -20,6 +20,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isMenuItemOrderable } from '@/lib/restaurant/menu-service';
 
 export interface POSCategory {
   id: string;
@@ -35,6 +36,8 @@ export interface POSItem {
   taxRate: number;
   isVegetarian: boolean;
   isAvailable: boolean;
+  availabilityStatus?: 'AVAILABLE' | 'TEMPORARILY_UNAVAILABLE' | 'SEASONAL_UNAVAILABLE' | string;
+  isArchived?: boolean;
   kitchenStation?: string | null;
   description?: string | null;
 }
@@ -361,45 +364,68 @@ export function POSTerminal({
 
         {/* Menu Items Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-          {visibleItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => addToCart(item)}
-              className="p-3 bg-white rounded-lg border border-resort-sand hover:border-resort-forest/80 cursor-pointer shadow-sm hover:shadow transition-all flex flex-col justify-between select-none"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-1">
-                  <span
-                    className={cn(
-                      'w-2.5 h-2.5 rounded-full inline-block shrink-0',
-                      item.isVegetarian ? 'bg-emerald-600' : 'bg-red-600'
-                    )}
-                    title={item.isVegetarian ? 'Vegetarian' : 'Non-Vegetarian'}
-                  />
-                  <span className="text-[10px] text-resort-stone font-mono uppercase">
-                    {item.code}
+          {visibleItems.map((item) => {
+            const isOrderable = isMenuItemOrderable(item);
+            const statusLabel =
+              item.availabilityStatus === 'SEASONAL_UNAVAILABLE'
+                ? 'Seasonal Unavailable'
+                : item.availabilityStatus === 'TEMPORARILY_UNAVAILABLE' || !item.isAvailable
+                ? 'Out of Stock'
+                : null;
+
+            return (
+              <div
+                key={item.id}
+                onClick={() => {
+                  if (!isOrderable) return;
+                  addToCart(item);
+                }}
+                className={cn(
+                  'p-3 bg-white rounded-lg border shadow-sm transition-all flex flex-col justify-between select-none relative',
+                  isOrderable
+                    ? 'border-resort-sand hover:border-resort-forest/80 cursor-pointer hover:shadow'
+                    : 'border-resort-sand/60 opacity-60 bg-gray-50/80 cursor-not-allowed'
+                )}
+              >
+                {!isOrderable && statusLabel && (
+                  <span className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                    {statusLabel}
+                  </span>
+                )}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-1 pr-16">
+                    <span
+                      className={cn(
+                        'w-2.5 h-2.5 rounded-full inline-block shrink-0',
+                        item.isVegetarian ? 'bg-emerald-600' : 'bg-red-600'
+                      )}
+                      title={item.isVegetarian ? 'Vegetarian' : 'Non-Vegetarian'}
+                    />
+                    <span className="text-[10px] text-resort-stone font-mono uppercase">
+                      {item.code}
+                    </span>
+                  </div>
+                  <h4 className="font-serif font-bold text-xs text-resort-charcoal leading-snug line-clamp-2">
+                    {item.name}
+                  </h4>
+                  {item.description && (
+                    <p className="text-[10px] text-resort-stone line-clamp-2 leading-relaxed">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-2 mt-2 border-t border-resort-sand/60 flex items-center justify-between">
+                  <span className="font-bold text-xs text-resort-forest">
+                    {formatCurrency(item.price)}
+                  </span>
+                  <span className="text-[10px] text-resort-stone bg-resort-sand/30 px-1.5 py-0.5 rounded">
+                    +{item.taxRate}% GST
                   </span>
                 </div>
-                <h4 className="font-serif font-bold text-xs text-resort-charcoal leading-snug line-clamp-2">
-                  {item.name}
-                </h4>
-                {item.description && (
-                  <p className="text-[10px] text-resort-stone line-clamp-2 leading-relaxed">
-                    {item.description}
-                  </p>
-                )}
               </div>
-
-              <div className="pt-2 mt-2 border-t border-resort-sand/60 flex items-center justify-between">
-                <span className="font-bold text-xs text-resort-forest">
-                  {formatCurrency(item.price)}
-                </span>
-                <span className="text-[10px] text-resort-stone bg-resort-sand/30 px-1.5 py-0.5 rounded">
-                  +{item.taxRate}% GST
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

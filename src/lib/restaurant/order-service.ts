@@ -86,11 +86,13 @@ export async function createRestaurantOrder(
       where: {
         id: { in: menuItemIds },
         isAvailable: true,
+        isArchived: false,
+        availabilityStatus: 'AVAILABLE',
       },
     });
 
     if (dbMenuItems.length !== new Set(menuItemIds).size) {
-      throw new Error('One or more requested menu items are unavailable or do not exist.');
+      throw new Error('One or more requested menu items are unavailable, out of season, archived, or do not exist.');
     }
 
     const itemMap = new Map(dbMenuItems.map((item) => [item.id, item]));

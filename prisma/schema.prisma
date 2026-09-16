@@ -156,6 +156,12 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum MenuItemAvailability {
+  AVAILABLE
+  TEMPORARILY_UNAVAILABLE
+  SEASONAL_UNAVAILABLE
+}
+
 enum TableStatus {
   AVAILABLE
   RESERVED
@@ -949,31 +955,53 @@ model Refund {
 // ==========================================
 
 model Restaurant {
-  id          String            @id @default(cuid())
-  name        String
-  code        String            @unique
-  description String?
-  tables      RestaurantTable[]
-  menus       MenuCategory[]
-  orders      RestaurantOrder[]
-  phone       String?
-  email       String?
-  openingTime String?
-  closingTime String?
-  isActive    Boolean           @default(true)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id           String            @id @default(cuid())
+  name         String
+  code         String            @unique
+  description  String?
+  tables       RestaurantTable[]
+  sittingAreas SittingArea[]
+  menus        MenuCategory[]
+  orders       RestaurantOrder[]
+  phone        String?
+  email        String?
+  openingTime  String?
+  closingTime  String?
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model SittingArea {
+  id           String            @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  code         String
+  description  String?
+  displayOrder Int               @default(0)
+  isActive     Boolean           @default(true)
+  tables       RestaurantTable[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([restaurantId, code])
+  @@unique([restaurantId, name])
+  @@index([restaurantId])
 }
 
 model RestaurantTable {
   id            String              @id @default(cuid())
   restaurantId  String
   restaurant    Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  sittingAreaId String?
+  sittingArea   SittingArea?        @relation(fields: [sittingAreaId], references: [id], onDelete: SetNull)
   tableNumber   String
   capacity      Int                 @default(4)
-  section       String              @default("Main Dining")
+  section       String              @default("Main Dining") // Legacy field, SittingArea is authoritative
   status        TableStatus         @default(AVAILABLE)
   isActive      Boolean             @default(true)
+  isArchived    Boolean             @default(false)
   
   sessionTables TableSessionTable[]
   
@@ -982,6 +1010,7 @@ model RestaurantTable {
 
   @@unique([restaurantId, tableNumber])
   @@index([status])
+  @@index([sittingAreaId])
 }
 
 model TableSession {
@@ -1029,19 +1058,22 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id           String                @id @default(cuid())
-  categoryId   String
-  category     MenuCategory          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  name         String
-  code         String                @unique
-  description  String?
-  price        Decimal               @db.Decimal(10, 2)
-  taxRate        Decimal               @default(5.00) @db.Decimal(5, 2)
-  taxCode        String?
-  isVegetarian   Boolean               @default(true)
-  isAvailable    Boolean               @default(true)
-  kitchenStation String?               @default("MAIN_KITCHEN")
-  imageUrl       String?
+  id                 String                @id @default(cuid())
+  categoryId         String
+  category           MenuCategory          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name               String
+  code               String                @unique
+  description        String?
+  price              Decimal               @db.Decimal(10, 2)
+  taxRate            Decimal               @default(5.00) @db.Decimal(5, 2)
+  taxCode            String?
+  isVegetarian       Boolean               @default(true)
+  isAvailable        Boolean               @default(true)
+  availabilityStatus MenuItemAvailability  @default(AVAILABLE)
+  prepTimeMinutes    Int?
+  isArchived         Boolean               @default(false)
+  kitchenStation     String?               @default("MAIN_KITCHEN")
+  imageUrl           String?
   
   orderItems   RestaurantOrderItem[]
   kotItems     KOTItem[]
@@ -1052,6 +1084,7 @@ model MenuItem {
 
   @@index([categoryId])
   @@index([isAvailable])
+  @@index([availabilityStatus])
 }
 
 model RestaurantOrder {

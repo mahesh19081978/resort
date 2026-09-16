@@ -21,7 +21,7 @@ export default async function POSPage({
         where: { isActive: true },
         include: {
           items: {
-            where: { isAvailable: true },
+            where: { isArchived: false },
             orderBy: { name: 'asc' },
           },
         },
@@ -42,7 +42,11 @@ export default async function POSPage({
     include: {
       tables: {
         include: {
-          table: true,
+          table: {
+            include: {
+              sittingArea: true,
+            },
+          },
         },
       },
     },
@@ -75,6 +79,8 @@ export default async function POSPage({
       taxRate: i.taxRate.toNumber(),
       isVegetarian: i.isVegetarian,
       isAvailable: i.isAvailable,
+      availabilityStatus: i.availabilityStatus,
+      isArchived: i.isArchived,
       kitchenStation: i.kitchenStation,
       description: i.description,
     })),
@@ -85,7 +91,10 @@ export default async function POSPage({
     sessionCode: s.sessionCode,
     guestName: s.guestName,
     paxCount: s.paxCount,
-    tableNumbers: s.tables.map((st) => st.table.tableNumber),
+    tableNumbers: s.tables.map((st) => {
+      const areaName = st.table.sittingArea?.name || st.table.section;
+      return `${st.table.tableNumber} (${areaName})`;
+    }),
   }));
 
   const formattedStays: POSActiveStay[] = inhouseStays

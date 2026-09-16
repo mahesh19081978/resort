@@ -1,10 +1,11 @@
 import { prisma } from '@/lib/db/prisma';
 import { requirePermission } from '@/lib/auth/auth';
 import { RestaurantHeader } from '@/components/restaurant/RestaurantHeader';
-import { formatCurrency } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { BookOpen, Check, X, ChefHat, Sparkles } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {
+  MenuManagementClient,
+  MenuCategoryData,
+  MenuItemData,
+} from '@/components/restaurant/MenuManagementClient';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ export default async function RestaurantMenuPage() {
         where: { isActive: true },
         include: {
           items: {
+            where: { isArchived: false },
             include: {
               recipe: {
                 include: {
@@ -40,91 +42,63 @@ export default async function RestaurantMenuPage() {
   });
 
   if (!restaurant) {
-    return <div className="p-8 text-center text-resort-stone">Restaurant not found.</div>;
+    return (
+      <div className="p-8 text-center text-resort-stone">
+        No active restaurant found. Please configure the restaurant in seed data.
+      </div>
+    );
   }
+
+  // Format serializable categories and items
+  const formattedCategories: MenuCategoryData[] = restaurant.menus.map((cat) => ({
+    id: cat.id,
+    name: cat.name,
+    displayOrder: cat.displayOrder,
+    isActive: cat.isActive,
+    items: cat.items.map((item) => ({
+      id: item.id,
+      categoryId: item.categoryId,
+      name: item.name,
+      code: item.code,
+      description: item.description,
+      price: item.price.toNumber(),
+      taxRate: item.taxRate.toNumber(),
+      taxCode: item.taxCode,
+      isVegetarian: item.isVegetarian,
+      isAvailable: item.isAvailable,
+      availabilityStatus: (item.availabilityStatus || 'AVAILABLE') as MenuItemData['availabilityStatus'],
+      prepTimeMinutes: item.prepTimeMinutes,
+      isArchived: item.isArchived,
+      kitchenStation: item.kitchenStation || 'MAIN_KITCHEN',
+      imageUrl: item.imageUrl,
+      recipe: item.recipe
+        ? {
+            id: item.recipe.id,
+            yieldCount: item.recipe.yieldCount,
+            ingredients: item.recipe.ingredients.map((ing) => ({
+              id: ing.id,
+              quantity: ing.quantity.toString(),
+              inventoryItem: {
+                id: ing.inventoryItem.id,
+                name: ing.inventoryItem.name,
+                baseUnit: { code: ing.inventoryItem.baseUnit.code },
+              },
+            })),
+          }
+        : null,
+    })),
+  }));
 
   return (
     <div className="space-y-6">
       <RestaurantHeader
-        title="Restaurant Menu & Recipe BOM"
-        subtitle="Live database-driven menu catalog with inventory ingredient formulations."
+        title="Restaurant Menu Management"
+        subtitle="Configure dish categories, live items, pricing, station assignments, and availability lifecycle."
       />
-
-      <div className="space-y-8">
-        {restaurant.menus.map((category) => (
-          <div key={category.id} className="space-y-4">
-            <div className="flex items-center justify-between border-b border-resort-sand pb-2">
-              <h2 className="font-serif text-lg font-bold text-resort-charcoal">
-                {category.name}
-              </h2>
-              <span className="text-xs text-resort-stone">
-                {category.items.length} items
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {category.items.map((item) => (
-                <Card key={item.id} className="hover:shadow-sm transition-all border border-resort-sand">
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={cn(
-                              'w-2.5 h-2.5 rounded-full inline-block shrink-0',
-                              item.isVegetarian ? 'bg-emerald-600' : 'bg-red-600'
-                            )}
-                            title={item.isVegetarian ? 'Vegetarian' : 'Non-Vegetarian'}
-                          />
-                          <h4 className="font-serif font-bold text-sm text-resort-charcoal">
-                            {item.name}
-                          </h4>
-                        </div>
-                        <span className="text-[10px] font-mono text-resort-stone uppercase">
-                          {item.code}
-                        </span>
-                      </div>
-                      <span className="font-bold text-sm text-resort-forest">
-                        {formatCurrency(item.price.toNumber())}
-                      </span>
-                    </div>
-
-                    {item.description && (
-                      <p className="text-xs text-resort-stone leading-relaxed">
-                        {item.description}
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between pt-2 border-t border-resort-sand/60 text-[11px] text-resort-stone">
-                      <span>Station: <strong>{item.kitchenStation || 'Main Kitchen'}</strong></span>
-                      <span>GST: <strong>{item.taxRate.toString()}%</strong></span>
-                    </div>
-
-                    {/* Recipe BOM Ingredients */}
-                    {item.recipe && item.recipe.ingredients.length > 0 && (
-                      <div className="p-2.5 bg-resort-sand/20 rounded border border-resort-sand/80 space-y-1.5 text-[11px]">
-                        <div className="font-semibold text-resort-charcoal flex items-center gap-1">
-                          <ChefHat className="w-3 h-3 text-resort-forest" /> Recipe Bill of Materials:
-                        </div>
-                        <div className="space-y-0.5">
-                          {item.recipe.ingredients.map((ing) => (
-                            <div key={ing.id} className="flex justify-between text-[10px] text-resort-stone">
-                              <span>• {ing.inventoryItem.name}</span>
-                              <span className="font-mono font-medium">
-                                {ing.quantity.toString()} {ing.inventoryItem.baseUnit.code}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <MenuManagementClient
+        restaurantId={restaurant.id}
+        categories={formattedCategories}
+      />
     </div>
   );
 }

@@ -14,6 +14,14 @@ import {
   recordBillPaymentSchema,
   roomChargeBillSchema,
   splitBillSchema,
+  menuCategorySchema,
+  menuItemSchema,
+  updateMenuItemPriceSchema,
+  setMenuItemAvailabilitySchema,
+  saveRecipeSchema,
+  sittingAreaSchema,
+  tableSchema,
+  bulkTableSchema,
 } from '@/validations/restaurant';
 import {
   openTableSession,
@@ -34,6 +42,31 @@ import {
   postBillToRoomCharge,
   splitRestaurantBill,
 } from '@/lib/restaurant/billing-service';
+import {
+  listMenuCategories,
+  upsertMenuCategory,
+  listMenuItems,
+  upsertMenuItem,
+  updateMenuItemPrice,
+  setMenuItemAvailability,
+  deleteOrArchiveMenuItem,
+} from '@/lib/restaurant/menu-service';
+import {
+  getRecipeForMenuItem,
+  saveRecipe,
+  deleteRecipe,
+} from '@/lib/restaurant/recipe-service';
+import {
+  listSittingAreas,
+  upsertSittingArea,
+  toggleSittingAreaActive,
+} from '@/lib/restaurant/sitting-area-service';
+import {
+  listTables,
+  upsertTable,
+  bulkCreateTables,
+  deleteOrArchiveTable,
+} from '@/lib/restaurant/table-management-service';
 import { consumeKOTInventory } from '@/lib/inventory/consumption-service';
 
 export interface ActionResponse<T = unknown> {
@@ -458,3 +491,298 @@ export async function splitRestaurantBillAction(
     };
   }
 }
+
+// ----------------------------------------------------
+// 12. MENU & CATEGORY SERVER ACTIONS
+// ----------------------------------------------------
+
+export async function saveMenuCategoryAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:order:update');
+    const parsed = menuCategorySchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await upsertMenuCategory({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/menu');
+    revalidatePath('/admin/restaurant/pos');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save menu category',
+    };
+  }
+}
+
+export async function saveMenuItemAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:order:update');
+    const parsed = menuItemSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await upsertMenuItem({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/menu');
+    revalidatePath('/admin/restaurant/pos');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save menu item',
+    };
+  }
+}
+
+export async function updateMenuItemPriceAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:order:update');
+    const parsed = updateMenuItemPriceSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await updateMenuItemPrice(
+      parsed.data.menuItemId,
+      parsed.data.price,
+      user.id
+    );
+
+    revalidatePath('/admin/restaurant/menu');
+    revalidatePath('/admin/restaurant/pos');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update menu item price',
+    };
+  }
+}
+
+export async function setMenuItemAvailabilityAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:order:update');
+    const parsed = setMenuItemAvailabilitySchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await setMenuItemAvailability(
+      parsed.data.menuItemId,
+      parsed.data.availabilityStatus,
+      parsed.data.isAvailable,
+      user.id
+    );
+
+    revalidatePath('/admin/restaurant/menu');
+    revalidatePath('/admin/restaurant/pos');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to set item availability',
+    };
+  }
+}
+
+export async function deleteOrArchiveMenuItemAction(menuItemId: string): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:order:update');
+    const result = await deleteOrArchiveMenuItem(menuItemId, user.id);
+
+    revalidatePath('/admin/restaurant/menu');
+    revalidatePath('/admin/restaurant/pos');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to remove or archive menu item',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 13. RECIPE / BOM SERVER ACTIONS
+// ----------------------------------------------------
+
+export async function getRecipeAction(menuItemId: string): Promise<ActionResponse> {
+  try {
+    await requirePermission('recipe:read');
+    const result = await getRecipeForMenuItem(menuItemId);
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to load recipe',
+    };
+  }
+}
+
+export async function saveRecipeAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('recipe:manage');
+    const parsed = saveRecipeSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await saveRecipe({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/recipes');
+    revalidatePath('/admin/restaurant/menu');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save recipe',
+    };
+  }
+}
+
+export async function deleteRecipeAction(recipeId: string): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('recipe:manage');
+    const result = await deleteRecipe(recipeId, user.id);
+
+    revalidatePath('/admin/restaurant/recipes');
+    revalidatePath('/admin/restaurant/menu');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete recipe',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 14. SITTING AREA SERVER ACTIONS
+// ----------------------------------------------------
+
+export async function saveSittingAreaAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:table:manage');
+    const parsed = sittingAreaSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await upsertSittingArea({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/tables');
+    revalidatePath('/admin/restaurant');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save sitting area',
+    };
+  }
+}
+
+export async function toggleSittingAreaAction(
+  sittingAreaId: string,
+  isActive: boolean
+): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:table:manage');
+    const result = await toggleSittingAreaActive(sittingAreaId, isActive, user.id);
+
+    revalidatePath('/admin/restaurant/tables');
+    revalidatePath('/admin/restaurant');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to toggle sitting area status',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// 15. TABLE CONFIGURATION SERVER ACTIONS
+// ----------------------------------------------------
+
+export async function saveTableAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:table:manage');
+    const parsed = tableSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await upsertTable({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/tables');
+    revalidatePath('/admin/restaurant/pos');
+    revalidatePath('/admin/restaurant');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save table',
+    };
+  }
+}
+
+export async function bulkCreateTablesAction(rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:table:manage');
+    const parsed = bulkTableSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await bulkCreateTables({
+      ...parsed.data,
+      userId: user.id,
+    });
+
+    revalidatePath('/admin/restaurant/tables');
+    revalidatePath('/admin/restaurant/pos');
+    revalidatePath('/admin/restaurant');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Bulk table creation failed',
+    };
+  }
+}
+
+export async function deleteOrArchiveTableAction(tableId: string): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('restaurant:table:manage');
+    const result = await deleteOrArchiveTable(tableId, user.id);
+
+    revalidatePath('/admin/restaurant/tables');
+    revalidatePath('/admin/restaurant/pos');
+    revalidatePath('/admin/restaurant');
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to remove or archive table',
+    };
+  }
+}
+
