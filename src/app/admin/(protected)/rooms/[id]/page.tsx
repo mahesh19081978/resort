@@ -14,8 +14,6 @@ import {
   ShieldCheck,
   Tag,
   CheckCircle2,
-  Calendar,
-  User,
   Save,
 } from 'lucide-react';
 import { updateRoomStatusAction, setRoomAmenityOverrideAction } from '@/actions/pms';
@@ -252,35 +250,6 @@ export default async function RoomDetailsPage({ params }: RoomDetailsPageProps) 
             </CardContent>
           </Card>
 
-          {/* Future PMS Extension Points (Unfaked Placeholders) */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Operational Lifecycle Placeholders</CardTitle>
-              <CardDescription className="text-xs">
-                Reserved extension points for Phase 0.5 Check-In / Check-Out and Housekeeping lifecycles.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs text-resort-stone">
-              <div className="p-3 rounded border border-dashed border-resort-sand flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-resort-stone" />
-                  <span>Current Stay / Active Guest Assignment:</span>
-                </div>
-                <span className="text-[11px] font-medium text-resort-stone italic">
-                  Available for Assignment (No active stay)
-                </span>
-              </div>
-              <div className="p-3 rounded border border-dashed border-resort-sand flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-resort-stone" />
-                  <span>Upcoming Room Reservations:</span>
-                </div>
-                <span className="text-[11px] font-medium text-resort-stone italic">
-                  Commercial Engine Connected (Phase 0.6)
-                </span>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Right 1 Column: Manual Actions (Status & Override Form) */}
