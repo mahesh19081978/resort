@@ -1,4 +1,5 @@
 import React from 'react';
+import { redirect } from 'next/navigation';
 import { AdminSidebar, AdminTopbar } from '@/components/layout/AdminNavigation';
 import { getCurrentUser } from '@/lib/auth/auth';
 import { getBusinessDateNow } from '@/lib/frontdesk/arrivals';
@@ -11,6 +12,11 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const user = await getCurrentUser();
+
+  if (!user) {
+    redirect('/admin/login');
+  }
+
   const businessDate = getBusinessDateNow();
 
   return (

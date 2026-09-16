@@ -20,6 +20,16 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
+    // Authenticated admin root: redirect /admin to /admin/dashboard
+    if (pathname === '/admin' || pathname === '/admin/') {
+      if (sessionToken) {
+        const session = await verifySessionToken(sessionToken);
+        if (session && session.sub) {
+          return NextResponse.redirect(new URL('/admin/dashboard', request.url));
+        }
+      }
+    }
+
     if (!sessionToken) {
       const loginUrl = new URL('/admin/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
