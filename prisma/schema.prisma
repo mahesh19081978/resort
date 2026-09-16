@@ -244,6 +244,16 @@ enum TransferStatus {
   CANCELLED
 }
 
+enum StockRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  CANCELLED
+  FULFILLED
+}
+
 enum PurchaseRequestStatus {
   DRAFT
   PENDING_APPROVAL
@@ -346,6 +356,8 @@ model User {
   approvedTransfers   StockTransfer[]   @relation("TransferApprover")
   dispatchedTransfers StockTransfer[]   @relation("TransferDispatcher")
   receivedTransfers   StockTransfer[]   @relation("TransferReceiver")
+  stockRequests       StockRequest[]    @relation("StockRequester")
+  approvedStockRequests StockRequest[]  @relation("StockRequestApprover")
   purchaseRequests    PurchaseRequest[] @relation("PurchaseRequester")
   approvedRequests    PurchaseRequest[] @relation("PurchaseApprover")
   issuedPOs           PurchaseOrder[]   @relation("PurchaseOrderIssuer")
@@ -1255,6 +1267,8 @@ model Store {
   movementsTo   StockMovement[] @relation("MovementDestStore")
   transfersFrom StockTransfer[] @relation("TransferSourceStore")
   transfersTo   StockTransfer[] @relation("TransferDestStore")
+  stockRequestsFrom StockRequest[] @relation("StockRequestSourceStore")
+  stockRequestsTo   StockRequest[] @relation("StockRequestDestStore")
   stockCounts   StockCount[]
   
   createdAt     DateTime        @default(now())
@@ -1272,6 +1286,7 @@ model Unit {
   conversionsTo   UnitConversion[]    @relation("ConversionTo")
   movementUnits   StockMovement[]     @relation("MovementTxUnit")
   transferUnits   StockTransferItem[]
+  requestUnits    StockRequestItem[]
   
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
@@ -1322,6 +1337,7 @@ model InventoryItem {
   poItems           PurchaseOrderItem[]
   grnItems          GoodsReceiptItem[]
   prItems           PurchaseRequestItem[]
+  requestItems      StockRequestItem[]
   recipeIngredients RecipeIngredient[]
   
   createdAt         DateTime            @default(now())
@@ -1386,6 +1402,9 @@ model StockTransfer {
   receivedAt     DateTime?
   notes          String?
   
+  stockRequestId String?
+  stockRequest   StockRequest?      @relation(fields: [stockRequestId], references: [id], onDelete: SetNull)
+  
   items          StockTransferItem[]
   movements      StockMovement[]
   
@@ -1396,6 +1415,7 @@ model StockTransfer {
   @@index([sourceStoreId])
   @@index([destStoreId])
   @@index([status])
+  @@index([stockRequestId])
 }
 
 model StockTransferItem {
@@ -1413,6 +1433,53 @@ model StockTransferItem {
   notes         String?
 
   @@unique([transferId, itemId])
+}
+
+model StockRequest {
+  id                  String             @id @default(cuid())
+  requestNumber       String             @unique
+  department          String
+  sourceStoreId       String
+  sourceStore         Store              @relation("StockRequestSourceStore", fields: [sourceStoreId], references: [id], onDelete: Restrict)
+  destinationStoreId  String
+  destinationStore    Store              @relation("StockRequestDestStore", fields: [destinationStoreId], references: [id], onDelete: Restrict)
+  requestedById       String
+  requestedBy         User               @relation("StockRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  status              StockRequestStatus @default(DRAFT)
+  reason              String?
+  approvedById        String?
+  approvedBy          User?              @relation("StockRequestApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt          DateTime?
+  rejectionReason     String?
+  notes               String?
+  
+  items               StockRequestItem[]
+  transfers           StockTransfer[]
+  movements           StockMovement[]
+  
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([requestNumber])
+  @@index([department])
+  @@index([sourceStoreId])
+  @@index([destinationStoreId])
+  @@index([status])
+}
+
+model StockRequestItem {
+  id                  String             @id @default(cuid())
+  requestId           String
+  request             StockRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  inventoryItemId     String
+  inventoryItem       InventoryItem      @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  requestedQty        Decimal            @db.Decimal(12, 4)
+  approvedQty         Decimal            @default(0.00) @db.Decimal(12, 4)
+  unitId              String
+  unit                Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  notes               String?
+
+  @@unique([requestId, inventoryItemId])
 }
 
 model StockMovement {
@@ -1438,6 +1505,8 @@ model StockMovement {
   
   transferId        String?
   transfer          StockTransfer?        @relation(fields: [transferId], references: [id], onDelete: SetNull)
+  stockRequestId    String?
+  stockRequest      StockRequest?         @relation(fields: [stockRequestId], references: [id], onDelete: SetNull)
   fromStoreId       String?
   fromStore         Store?                @relation("MovementSourceStore", fields: [fromStoreId], references: [id], onDelete: SetNull)
   toStoreId         String?

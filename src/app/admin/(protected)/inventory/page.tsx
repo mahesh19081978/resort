@@ -7,7 +7,7 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 
 export default async function InventoryDashboardPage() {
-  const [stores, itemsCount, lowStockCount, movementsCount, pendingTransfers, recentMovements] = await Promise.all([
+  const [stores, itemsCount, lowStockCount, movementsCount, pendingRequestsCount, recentRequests, recentTransfers, recentMovements] = await Promise.all([
     prisma.store.findMany({
       where: { isActive: true },
       include: {
@@ -30,9 +30,28 @@ export default async function InventoryDashboardPage() {
       },
     }),
     prisma.stockMovement.count(),
-    prisma.stockTransfer.count({
+    prisma.stockRequest.count({
       where: {
-        status: { in: ['PENDING_DISPATCH', 'IN_TRANSIT'] },
+        status: { in: ['SUBMITTED', 'APPROVED', 'PARTIALLY_APPROVED'] },
+      },
+    }),
+    prisma.stockRequest.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        destinationStore: true,
+        sourceStore: true,
+        requestedBy: { select: { name: true, email: true } },
+        items: { include: { inventoryItem: true, unit: true } },
+      },
+    }),
+    prisma.stockTransfer.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        sourceStore: true,
+        destStore: true,
+        items: { include: { item: true } },
       },
     }),
     prisma.stockMovement.findMany({
@@ -51,8 +70,17 @@ export default async function InventoryDashboardPage() {
         <div>
           <h1 className="font-serif text-2xl font-bold text-resort-charcoal">Inventory & Store Ledger</h1>
           <p className="text-xs text-resort-stone mt-1">
-            Authoritative transactional stock ledger, physical transfers, KOT consumption, and store balances.
+            Authoritative transactional stock ledger, physical transfers, internal department issues, and store balances.
           </p>
+        </div>
+        <div className="flex gap-2.5">
+          <Link
+            href="/admin/inventory/requests"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-resort-forest text-white text-xs font-semibold hover:bg-resort-forest/90 transition-colors shadow-sm"
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            Stock Requests & Handover
+          </Link>
         </div>
       </div>
 
@@ -85,8 +113,8 @@ export default async function InventoryDashboardPage() {
         <Card className="border-l-4 border-l-amber-500 bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6 flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">Pending Transfers</p>
-              <p className="text-2xl font-serif font-bold text-amber-950 mt-1">{pendingTransfers}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">Pending Requests</p>
+              <p className="text-2xl font-serif font-bold text-amber-950 mt-1">{pendingRequestsCount}</p>
             </div>
             <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
               <ArrowLeftRight className="w-5 h-5" />
@@ -106,6 +134,87 @@ export default async function InventoryDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Pending Stock Requests Section */}
+      {recentRequests.length > 0 && (
+        <Card className="border-amber-200/60 bg-amber-50/20">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-serif font-bold text-resort-charcoal">
+                Active Department Stock Requests
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Internal store requests pending approval or warehouse issue/handover.
+              </CardDescription>
+            </div>
+            <Link
+              href="/admin/inventory/requests"
+              className="text-xs font-semibold text-resort-forest hover:underline"
+            >
+              View All Requests →
+            </Link>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-border/80 text-resort-stone uppercase text-[10px] tracking-wider">
+                    <th className="py-2.5 px-3">Request #</th>
+                    <th className="py-2.5 px-3">Department</th>
+                    <th className="py-2.5 px-3">Destination Store</th>
+                    <th className="py-2.5 px-3">Items</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Date</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {recentRequests.map((req) => (
+                    <tr key={req.id} className="hover:bg-amber-100/30">
+                      <td className="py-2.5 px-3 font-mono font-medium text-resort-charcoal">
+                        {req.requestNumber}
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-resort-charcoal">{req.department}</td>
+                      <td className="py-2.5 px-3 text-resort-stone">{req.destinationStore.name}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="font-mono">{req.items.length} items</span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <Badge
+                          variant="outline"
+                          className={
+                            req.status === 'APPROVED' || req.status === 'PARTIALLY_APPROVED'
+                              ? 'bg-blue-50 text-blue-700 text-[10px]'
+                              : req.status === 'SUBMITTED'
+                              ? 'bg-amber-50 text-amber-700 text-[10px]'
+                              : 'bg-emerald-50 text-emerald-700 text-[10px]'
+                          }
+                        >
+                          {req.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 px-3 text-resort-stone">
+                        {new Date(req.createdAt).toLocaleDateString('en-IN', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <Link
+                          href="/admin/inventory/requests"
+                          className="px-2.5 py-1 text-[11px] font-medium rounded bg-white border border-border hover:bg-resort-sand/30 text-resort-charcoal transition-colors"
+                        >
+                          Review
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stores Overview Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

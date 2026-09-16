@@ -56,6 +56,8 @@ export type Permission =
   | 'inventory:stock:transfer'
   | 'inventory:stock:adjust'
   | 'inventory:stock:wastage'
+  | 'inventory:request:create'
+  | 'inventory:request:approve'
   | 'inventory:transfer:create'
   | 'inventory:transfer:approve'
   | 'inventory:transfer:dispatch'
@@ -109,7 +111,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
-    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:stock:wastage', 'inventory:request:create', 'inventory:request:approve',
+    'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
     'inventory:opening-balance:create', 'inventory:report:view',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
@@ -131,7 +134,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
-    'inventory:stock:wastage', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
+    'inventory:stock:wastage', 'inventory:request:create', 'inventory:request:approve',
+    'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
     'inventory:opening-balance:create', 'inventory:report:view',
     'procurement:request:create', 'procurement:order:create', 'procurement:grn:receive',
     'procurement:bill:process', 'vendor:manage',
@@ -152,7 +156,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update', 'restaurant:order:cancel',
     'restaurant:table:manage', 'restaurant:bill:create', 'restaurant:bill:settle', 'restaurant:bill:void',
     'restaurant:room-charge', 'kitchen:view', 'kitchen:update_kot', 'recipe:read', 'recipe:manage',
-    'inventory:read', 'inventory:stock:issue', 'inventory:stock:wastage', 'reports:operational',
+    'inventory:read', 'inventory:request:create', 'inventory:stock:issue', 'inventory:stock:wastage', 'reports:operational',
   ],
   RESTAURANT_BILLER: [
     'restaurant:order:create', 'restaurant:order:read', 'restaurant:order:update',
@@ -160,12 +164,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     'restaurant:table:manage',
   ],
   KITCHEN_STAFF: [
-    'kitchen:view', 'kitchen:update_kot', 'inventory:stock:wastage',
+    'kitchen:view', 'kitchen:update_kot', 'inventory:request:create', 'inventory:stock:wastage',
   ],
   STORE_MANAGER: [
     'inventory:read', 'inventory:issue', 'inventory:adjust', 'inventory:transfer', 'inventory:count',
     'inventory:item:manage', 'inventory:stock:issue', 'inventory:stock:transfer', 'inventory:stock:adjust',
-    'inventory:stock:wastage', 'inventory:transfer:create', 'inventory:transfer:approve', 'inventory:transfer:dispatch',
+    'inventory:stock:wastage', 'inventory:request:create', 'inventory:request:approve',
+    'inventory:transfer:create', 'inventory:transfer:approve', 'inventory:transfer:dispatch',
     'inventory:transfer:receive', 'inventory:count:create', 'inventory:count:approve', 'inventory:count:post',
     'inventory:opening-balance:create', 'inventory:report:view',
     'recipe:read',

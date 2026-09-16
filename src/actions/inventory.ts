@@ -4,12 +4,21 @@ import { prisma } from '@/lib/db/prisma';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { postStockMovement } from '@/lib/inventory/stock-ledger-service';
 import { createStockTransfer, approveStockTransfer, dispatchStockTransfer, receiveStockTransfer } from '@/lib/inventory/transfer-service';
+import {
+  createStockRequest,
+  submitStockRequest,
+  approveStockRequest,
+  rejectStockRequest,
+  cancelStockRequest,
+  executeIssueAndTransfer,
+  getStockRequestsList,
+} from '@/lib/inventory/request-service';
 import { createStockCount, recordStockCountItems, postStockCount } from '@/lib/inventory/count-service';
 import { requirePermission } from '@/lib/permissions/rbac';
 import { getCurrentUser } from '@/lib/auth/auth';
 import { revalidatePath } from 'next/cache';
 
-export interface ActionResponse<T = unknown> {
+export interface ActionResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
@@ -328,5 +337,222 @@ export async function postStockCountAction(params: {
     return { success: true, data: result };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to post stock count' };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 7. STOCK REQUEST ACTIONS
+// ----------------------------------------------------------------------------
+export async function createStockRequestAction(params: {
+  department: string;
+  sourceStoreId?: string;
+  destinationStoreId?: string;
+  reason?: string | null;
+  submitImmediately?: boolean;
+  items: Array<{
+    itemId: string;
+    requestedQty: number | string;
+    unitId?: string | null;
+    notes?: string | null;
+  }>;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:request:create');
+
+    const result = await createStockRequest({
+      ...params,
+      requestedById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to create stock request' };
+  }
+}
+
+export async function submitStockRequestAction(requestId: string): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:request:create');
+
+    const result = await submitStockRequest(requestId, user.id);
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to submit stock request' };
+  }
+}
+
+export async function approveStockRequestAction(params: {
+  requestId: string;
+  items?: Array<{
+    itemId: string;
+    approvedQty: number | string;
+  }>;
+  notes?: string | null;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:request:approve');
+
+    const result = await approveStockRequest({
+      ...params,
+      approvedById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to approve stock request' };
+  }
+}
+
+export async function rejectStockRequestAction(params: {
+  requestId: string;
+  rejectionReason: string;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:request:approve');
+
+    const result = await rejectStockRequest({
+      ...params,
+      rejectedById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to reject stock request' };
+  }
+}
+
+export async function cancelStockRequestAction(params: {
+  requestId: string;
+  reason?: string | null;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
+    const result = await cancelStockRequest({
+      ...params,
+      cancelledById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to cancel stock request' };
+  }
+}
+
+export async function issueAndTransferStockAction(params: {
+  requestId: string;
+  remarks?: string | null;
+  items?: Array<{
+    itemId: string;
+    issuedQty: number | string;
+    shortReason?: string | null;
+  }>;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:stock:transfer');
+
+    const result = await executeIssueAndTransfer({
+      ...params,
+      performedById: user.id,
+    });
+
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/inventory/requests');
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to issue/transfer stock' };
+  }
+}
+
+export async function getStockRequestsAction(params?: {
+  department?: string;
+  status?: any;
+  destinationStoreId?: string;
+  sourceStoreId?: string;
+  take?: number;
+  skip?: number;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:read');
+
+    const result = await getStockRequestsList(params);
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to fetch stock requests' };
+  }
+}
+
+export async function getStockRequestLookupDataAction(): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
+    const [items, stores, mainStoreStocks] = await Promise.all([
+      prisma.inventoryItem.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          baseUnitId: true,
+          baseUnit: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.store.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, code: true, department: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.stock.findMany({
+        where: { store: { code: 'STORE-MAIN' } },
+        select: { itemId: true, quantityOnHand: true },
+      }),
+    ]);
+
+    const centralStockMap: Record<string, string> = {};
+    for (const s of mainStoreStocks) {
+      centralStockMap[s.itemId] = s.quantityOnHand.toFixed(4);
+    }
+
+    return {
+      success: true,
+      data: {
+        currentUser: {
+          id: user.id,
+          name: user.name,
+          role: user.role,
+        },
+        items,
+        stores,
+        centralStockMap,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to load stock request lookups' };
   }
 }

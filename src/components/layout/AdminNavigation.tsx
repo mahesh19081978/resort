@@ -13,6 +13,7 @@ import {
   UtensilsCrossed,
   Boxes,
   Truck,
+  ClipboardList,
   ShieldCheck,
   FileBarChart,
   Settings,
@@ -67,6 +68,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: '/admin/property', label: 'Property & Buildings', icon: Building },
       { href: '/admin/inventory', label: 'Inventory & Store', icon: Boxes },
+      { href: '/admin/inventory/requests', label: 'Stock Requests', icon: ClipboardList },
       { href: '/admin/procurement', label: 'Procurement & GRN', icon: Truck },
     ],
   },

@@ -8,6 +8,7 @@ export interface CreateStockTransferParams {
   sourceStoreId: string;
   destStoreId: string;
   requestedById?: string | null;
+  stockRequestId?: string | null;
   notes?: string | null;
   items: Array<{
     itemId: string;
@@ -47,7 +48,7 @@ export async function createStockTransfer(
   params: CreateStockTransferParams,
   client: Prisma.TransactionClient | typeof prisma = prisma
 ) {
-  const { sourceStoreId, destStoreId, requestedById, notes, items } = params;
+  const { sourceStoreId, destStoreId, requestedById, stockRequestId, notes, items } = params;
 
   if (sourceStoreId === destStoreId) {
     throw new Error('Source store and destination store cannot be the same.');
@@ -71,6 +72,7 @@ export async function createStockTransfer(
         destStoreId,
         status: TransferStatus.DRAFT,
         requestedById: requestedById || null,
+        stockRequestId: stockRequestId || null,
         notes: notes || null,
       },
     });

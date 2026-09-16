@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-export type InventoryNumberPrefix = 'MOV' | 'TRF' | 'CNT' | 'ISS' | 'CON' | 'PR' | 'PO' | 'GRN' | 'PB' | 'VP' | 'VND';
+export type InventoryNumberPrefix = 'MOV' | 'TRF' | 'CNT' | 'ISS' | 'CON' | 'PR' | 'PO' | 'GRN' | 'PB' | 'VP' | 'VND' | 'SRQ';
 
 /**
  * Generates a collision-resistant business identifier conforming to standard inventory numbering:

@@ -77,6 +77,8 @@ async function main() {
     { code: 'inventory:stock:transfer', module: 'INVENTORY', description: 'Transfer stock movements' },
     { code: 'inventory:stock:adjust', module: 'INVENTORY', description: 'Adjust stock movements' },
     { code: 'inventory:stock:wastage', module: 'INVENTORY', description: 'Record stock wastage' },
+    { code: 'inventory:request:create', module: 'INVENTORY', description: 'Create stock requests' },
+    { code: 'inventory:request:approve', module: 'INVENTORY', description: 'Approve or reject stock requests' },
     { code: 'inventory:transfer:create', module: 'INVENTORY', description: 'Create stock transfers' },
     { code: 'inventory:transfer:approve', module: 'INVENTORY', description: 'Approve stock transfers' },
     { code: 'inventory:transfer:dispatch', module: 'INVENTORY', description: 'Dispatch stock transfers' },
@@ -696,6 +698,12 @@ async function main() {
     where: { code: 'STORE-MAINT' },
     update: {},
     create: { name: 'Engineering & Maintenance Store', code: 'STORE-MAINT', department: 'Maintenance' },
+  });
+
+  const storeGarden = await prisma.store.upsert({
+    where: { code: 'STORE-GARDEN' },
+    update: {},
+    create: { name: 'Garden Store', code: 'STORE-GARDEN', department: 'Garden' },
   });
 
   const catGrains = await prisma.inventoryCategory.upsert({

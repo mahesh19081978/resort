@@ -43,6 +43,7 @@ export interface PostStockMovementParams {
   stockCountId?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
+  stockRequestId?: string | null;
   performedById?: string | null;
   remarks?: string | null;
   allowNegativeStock?: boolean;
@@ -241,6 +242,7 @@ export async function postStockMovement(
         goodsReceiptId: params.goodsReceiptId || null,
         consumptionId: params.consumptionId || null,
         stockCountId: params.stockCountId || null,
+        stockRequestId: params.stockRequestId || null,
         sourceType: params.sourceType || null,
         sourceId: params.sourceId || null,
         performedById: params.performedById || null,
