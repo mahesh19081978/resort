@@ -1,24 +1,49 @@
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { requireAuth } from '@/lib/auth/auth';
+import { hasPermission } from '@/lib/permissions/rbac';
+import { redirect } from 'next/navigation';
+import {
+  getAccessKpis,
+  getStaffUsers,
+  getRolesWithStats,
+  getPermissionMatrix,
+  getSecurityAuditLogs,
+} from '@/lib/access/access-service';
+import { AccessDashboard } from '@/components/admin/access/AccessDashboard';
 
-export default function Page() {
+export const dynamic = 'force-dynamic';
+
+export default async function AccessManagementPage() {
+  const user = await requireAuth();
+
+  const canManageUsers = hasPermission(user, 'user:manage');
+  const canManageRoles = hasPermission(user, 'role:manage');
+  const canReadAudit = hasPermission(user, 'audit:read');
+
+  if (!canManageUsers && !canManageRoles && !canReadAudit) {
+    redirect('/admin/dashboard');
+  }
+
+  const [kpis, usersData, roles, matrix, auditLogs] = await Promise.all([
+    getAccessKpis(),
+    getStaffUsers(),
+    getRolesWithStats(),
+    getPermissionMatrix(),
+    getSecurityAuditLogs({ limit: 50 }),
+  ]);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl font-bold text-resort-charcoal">RBAC & Role Management</h1>
-        <p className="text-xs text-resort-stone mt-1">Granular permission sets for Super Admin, Receptionist, F&B Manager, Store Manager, etc.</p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>RBAC & Role Management Module Shell</CardTitle>
-          <CardDescription>Phase 0.1 Architectural Foundation</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-resort-stone leading-relaxed">
-            This module route is established within the operational Admin shell. In subsequent phases, full transactional workflows, Prisma queries, and domain actions will be plugged into this route.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <AccessDashboard
+      initialKpis={kpis}
+      initialUsers={usersData.users}
+      totalUsers={usersData.total}
+      initialRoles={roles}
+      matrix={matrix}
+      initialAuditLogs={auditLogs}
+      currentUserPermissions={{
+        canManageUsers,
+        canManageRoles,
+        canReadAudit,
+      }}
+    />
   );
 }

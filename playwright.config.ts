@@ -2,8 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load dedicated E2E environment variables
-dotenv.config({ path: path.resolve(__dirname, '.env.e2e') });
+// Load dedicated E2E environment variables (override any already-set vars from .env)
+dotenv.config({ path: path.resolve(__dirname, '.env.e2e'), override: true });
 
 export default defineConfig({
   testDir: './e2e',
@@ -39,6 +39,7 @@ export default defineConfig({
       DATABASE_URL: process.env.DATABASE_URL!,
       DIRECT_URL: process.env.DIRECT_URL!,
       E2E_ALLOWED_DB_HOSTS: process.env.E2E_ALLOWED_DB_HOSTS || 'ep-aged-wind',
+      AUTH_SECRET: process.env.AUTH_SECRET || 'supersecret_min_32_chars_random_string_here',
     },
   },
 });
