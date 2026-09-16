@@ -127,8 +127,8 @@ export async function getGuestProfile(guestId: string): Promise<GuestProfile | n
               items: { where: { isVoided: false }, select: { amount: true, taxAmount: true } },
               payments: {
                 where: { status: PaymentStatus.SUCCESS },
-                select: { amount: true },
-                include: {
+                select: {
+                  amount: true,
                   refunds: {
                     where: { status: RefundStatus.PROCESSED },
                     select: { amount: true },
