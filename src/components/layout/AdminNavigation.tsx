@@ -10,7 +10,6 @@ import {
   Building,
   UserCheck,
   Users,
-  Receipt,
   UtensilsCrossed,
   Boxes,
   Truck,
@@ -55,7 +54,6 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/admin/rooms', label: 'Rooms & PMS', icon: BedDouble },
       { href: '/admin/frontdesk', label: 'Front Desk Operations', icon: UserCheck },
       { href: '/admin/guests', label: 'Guest Database', icon: Users },
-      { href: '/admin/folios', label: 'Guest Folios', icon: Receipt },
     ],
   },
   {
