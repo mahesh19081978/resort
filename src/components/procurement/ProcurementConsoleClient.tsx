@@ -10,7 +10,7 @@ import {
   ShoppingCart,
   Truck,
   ReceiptText,
-  DollarSign,
+  IndianRupee,
   Users,
   Plus,
   Search,
@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Building2,
   Package,
+  Eye,
 } from 'lucide-react';
 import { ProcurementKpis } from './ProcurementKpis';
 import {
@@ -29,7 +30,9 @@ import {
   CreateGrnModal,
   CreateBillModal,
   CreatePaymentModal,
+  PurchaseBillDetailModal,
   CreateVendorModal,
+  PurchaseOrderDetailModal,
   LookupItem,
   LookupStore,
   LookupVendor,
@@ -38,6 +41,7 @@ import {
   getProcurementDashboardDataAction,
   getPurchaseRequestsAction,
   getPurchaseOrdersAction,
+  getPurchaseOrderDetailsAction,
   getGoodsReceiptsAction,
   getPurchaseBillsAction,
   getVendorPaymentsAction,
@@ -78,6 +82,8 @@ export default function ProcurementConsoleClient() {
   const [lookupItems, setLookupItems] = useState<LookupItem[]>([]);
   const [lookupStores, setLookupStores] = useState<LookupStore[]>([]);
   const [lookupVendors, setLookupVendors] = useState<LookupVendor[]>([]);
+  const [lookupCategories, setLookupCategories] = useState<Array<{ id: string; name: string; code: string }>>([]);
+  const [lookupUnits, setLookupUnits] = useState<Array<{ id: string; name: string; code: string }>>([]);
 
   // Tab Data Lists
   const [requests, setRequests] = useState<any[]>([]);
@@ -90,14 +96,56 @@ export default function ProcurementConsoleClient() {
   // Modal States
   const [isPrModalOpen, setIsPrModalOpen] = useState(false);
   const [isPoModalOpen, setIsPoModalOpen] = useState(false);
+  const [selectedPrForPo, setSelectedPrForPo] = useState<any>(null);
   const [isGrnModalOpen, setIsGrnModalOpen] = useState(false);
   const [selectedPoForGrn, setSelectedPoForGrn] = useState<any>(null);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [selectedPoForBill, setSelectedPoForBill] = useState<any>(null);
+  const [selectedGrnForBill, setSelectedGrnForBill] = useState<any>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [selectedPaymentVendorId, setSelectedPaymentVendorId] = useState<string | undefined>(undefined);
+  const [selectedPrefilledBill, setSelectedPrefilledBill] = useState<any>(null);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
+  const [isBillDetailModalOpen, setIsBillDetailModalOpen] = useState(false);
+  const [selectedBillForDetail, setSelectedBillForDetail] = useState<any>(null);
+  const [isPoDetailModalOpen, setIsPoDetailModalOpen] = useState(false);
+  const [poDetailsData, setPoDetailsData] = useState<any>(null);
+  const [poDetailsLoading, setPoDetailsLoading] = useState(false);
+
+  const handleViewPoDetails = async (poId: string) => {
+    setIsPoDetailModalOpen(true);
+    setPoDetailsLoading(true);
+    try {
+      const res = await getPurchaseOrderDetailsAction(poId);
+      if (res.success) {
+        setPoDetailsData(res.details);
+      } else {
+        showFeedback('error', res.error || 'Failed to load PO details');
+      }
+    } catch (err: any) {
+      showFeedback('error', err.message || 'Error loading PO details');
+    } finally {
+      setPoDetailsLoading(false);
+    }
+  };
+
+  // Pre-load bills then open payment modal (ensures bills list is populated from any tab)
+  // Pass prefilledBill to pre-allocate a specific bill (e.g. from bill row Pay button)
+  const handleOpenPaymentModal = async (vendorId?: string, prefilledBill?: any) => {
+    try {
+      const billsRes = await getPurchaseBillsAction();
+      if (billsRes.success) setBills(billsRes.bills || []);
+    } catch {
+      // swallow — modal will show empty list with an indicator
+    }
+    setSelectedPaymentVendorId(vendorId);
+    setSelectedPrefilledBill(prefilledBill ?? null);
+    setIsPaymentModalOpen(true);
+  };
 
   // Load Dashboard Data
   const refreshDashboard = async () => {
+
     try {
       const res = await getProcurementDashboardDataAction();
       if (res.success) {
@@ -105,6 +153,8 @@ export default function ProcurementConsoleClient() {
         setLookupItems(res.items as any);
         setLookupStores(res.stores as any);
         setLookupVendors(res.vendors as any);
+        if (res.categories) setLookupCategories(res.categories);
+        if (res.units) setLookupUnits(res.units);
       }
     } catch (err: any) {
       console.error('Failed to load dashboard data', err);
@@ -121,11 +171,19 @@ export default function ProcurementConsoleClient() {
         const res = await getPurchaseOrdersAction();
         if (res.success) setOrders(res.orders || []);
       } else if (tab === 'grn') {
-        const res = await getGoodsReceiptsAction();
-        if (res.success) setGrns(res.receipts || []);
+        const [grnRes, poRes] = await Promise.all([
+          getGoodsReceiptsAction(),
+          getPurchaseOrdersAction(),
+        ]);
+        if (grnRes.success) setGrns(grnRes.receipts || []);
+        if (poRes.success) setOrders(poRes.orders || []);
       } else if (tab === 'bills') {
-        const res = await getPurchaseBillsAction();
-        if (res.success) setBills(res.bills || []);
+        const [billsRes, poRes] = await Promise.all([
+          getPurchaseBillsAction(),
+          getPurchaseOrdersAction(),
+        ]);
+        if (billsRes.success) setBills(billsRes.bills || []);
+        if (poRes.success) setOrders(poRes.orders || []);
       } else if (tab === 'payments') {
         const res = await getVendorPaymentsAction();
         if (res.success) setPayments(res.payments || []);
@@ -205,8 +263,9 @@ export default function ProcurementConsoleClient() {
     try {
       const res = await createPurchaseOrderAction(data);
       if (res.success) {
-        showFeedback('success', `Purchase Order issued successfully!`);
+        showFeedback('success', `Purchase Order created successfully!`);
         setIsPoModalOpen(false);
+        setSelectedPrForPo(null);
         refreshDashboard();
         loadTabData(activeTab);
       } else {
@@ -256,7 +315,12 @@ export default function ProcurementConsoleClient() {
         refreshDashboard();
         loadTabData(activeTab);
       } else {
-        showFeedback('error', res.error || 'Failed to finalize GRN');
+        const detailMsg = res.details
+          ? Object.entries(res.details)
+              .map(([field, msgs]: [string, any]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+              .join('; ')
+          : '';
+        showFeedback('error', detailMsg ? `${res.error || 'Validation failed'}: ${detailMsg}` : (res.error || 'Failed to finalize GRN'));
       }
     } finally {
       setActionLoading(false);
@@ -270,6 +334,8 @@ export default function ProcurementConsoleClient() {
       if (res.success) {
         showFeedback('success', `Purchase Bill recorded in payables successfully!`);
         setIsBillModalOpen(false);
+        setSelectedPoForBill(null);
+        setSelectedGrnForBill(null);
         refreshDashboard();
         loadTabData(activeTab);
       } else {
@@ -369,10 +435,10 @@ export default function ProcurementConsoleClient() {
 
           <Button
             size="sm"
-            onClick={() => setIsPaymentModalOpen(true)}
+            onClick={() => handleOpenPaymentModal()}
             className="text-xs bg-emerald-700 hover:bg-emerald-800 text-white shadow-sm"
           >
-            <DollarSign className="w-3.5 h-3.5 mr-1" /> Pay Vendor
+            <IndianRupee className="w-3.5 h-3.5 mr-1" /> Pay Vendor
           </Button>
 
           <Button
@@ -409,12 +475,12 @@ export default function ProcurementConsoleClient() {
       <div className="flex border-b border-resort-sand/60 overflow-x-auto space-x-1 pb-px">
         {[
           { id: 'overview', label: 'Overview & Flow', icon: ShieldCheck },
-          { id: 'requests', label: `Purchase Requests (${kpis.pendingRequestsCount})`, icon: FileText },
-          { id: 'orders', label: `Purchase Orders (${kpis.openOrdersCount})`, icon: ShoppingCart },
-          { id: 'grn', label: 'Goods Receipts (GRN)', icon: Truck },
-          { id: 'bills', label: `Bills & Payables (${kpis.unpaidBillsCount})`, icon: ReceiptText },
-          { id: 'payments', label: 'Vendor Payments', icon: DollarSign },
-          { id: 'vendors', label: `Vendors (${kpis.activeVendorsCount})`, icon: Users },
+          { id: 'requests', label: `Purchase Requests (${kpis.pendingRequestsCount ?? kpis.pendingPRs ?? requests.length ?? 0})`, icon: FileText },
+          { id: 'orders', label: `Purchase Orders (${kpis.openOrdersCount ?? kpis.openPOs ?? orders.length ?? 0})`, icon: ShoppingCart },
+          { id: 'grn', label: `Goods Receipts (GRN)${kpis.grnThisMonthCount !== undefined ? ` (${kpis.grnThisMonthCount})` : ''}`, icon: Truck },
+          { id: 'bills', label: `Bills & Payables (${kpis.unpaidBillsCount ?? 0})`, icon: ReceiptText },
+          { id: 'payments', label: 'Vendor Payments', icon: IndianRupee },
+          { id: 'vendors', label: `Vendors (${kpis.activeVendorsCount ?? 0})`, icon: Users },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -504,10 +570,10 @@ export default function ProcurementConsoleClient() {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => setIsPaymentModalOpen(true)}
+                      onClick={() => handleOpenPaymentModal()}
                       className="w-full justify-start text-xs border-resort-sand"
                     >
-                      <DollarSign className="w-4 h-4 mr-2 text-emerald-700" /> Record Disbursed Payment
+                      <IndianRupee className="w-4 h-4 mr-2 text-emerald-700" /> Record Disbursed Payment
                     </Button>
                   </div>
                 </CardContent>
@@ -555,22 +621,42 @@ export default function ProcurementConsoleClient() {
                               {r.items?.map((i: any) => `${i.item.name} (${i.quantity})`).join(', ')}
                             </div>
                           </td>
-                          <td className="p-3 font-medium">₹{r.totalEstimatedCost}</td>
+                          <td className="p-3 font-medium">
+                            ₹{r.totalEstimatedCost !== undefined && r.totalEstimatedCost !== null
+                              ? r.totalEstimatedCost
+                              : (r.items?.reduce((sum: number, it: any) => sum + (Number(it.quantity || 0) * Number(it.estimatedCost || 0)), 0) || 0).toFixed(2)}
+                          </td>
                           <td className="p-3">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] uppercase ${
-                                r.status === 'APPROVED'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                  : r.status === 'SUBMITTED'
-                                  ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                  : r.status === 'REJECTED'
-                                  ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                  : 'bg-stone-50 text-stone-700 border-stone-300'
-                              }`}
-                            >
-                              {r.status}
-                            </Badge>
+                            {r.hasIssuedPo ? (
+                              <div className="space-y-0.5">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] uppercase bg-blue-50 text-blue-800 border-blue-300"
+                                >
+                                  PO ISSUED
+                                </Badge>
+                                {r.activePoNumbers?.length > 0 && (
+                                  <div className="text-[10px] text-resort-stone font-medium">
+                                    {r.activePoNumbers.join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] uppercase ${
+                                  r.status === 'APPROVED'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                    : r.status === 'SUBMITTED'
+                                    ? 'bg-blue-50 text-blue-800 border-blue-300'
+                                    : r.status === 'REJECTED'
+                                    ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                    : 'bg-stone-50 text-stone-700 border-stone-300'
+                                }`}
+                              >
+                                {r.status}
+                              </Badge>
+                            )}
                           </td>
                           <td className="p-3 text-resort-stone">{new Date(r.createdAt).toLocaleDateString()}</td>
                           <td className="p-3 text-right space-x-1.5">
@@ -585,7 +671,7 @@ export default function ProcurementConsoleClient() {
                                 Submit
                               </Button>
                             )}
-                            {r.status === 'SUBMITTED' && (
+                            {(r.status === 'PENDING_APPROVAL' || r.status === 'SUBMITTED') && (
                               <Button
                                 size="sm"
                                 onClick={() => handleApprovePr(r.id)}
@@ -594,6 +680,25 @@ export default function ProcurementConsoleClient() {
                               >
                                 Approve
                               </Button>
+                            )}
+                            {r.status === 'APPROVED' && (
+                              r.isFullyOrdered ? (
+                                <span className="text-[11px] font-semibold text-blue-800 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                                  PO Issued
+                                </span>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedPrForPo(r);
+                                    setIsPoModalOpen(true);
+                                  }}
+                                  disabled={actionLoading}
+                                  className="h-6 text-[10px] bg-blue-700 hover:bg-blue-800 text-white"
+                                >
+                                  <ShoppingCart className="w-3 h-3 mr-1 inline" /> Issue PO
+                                </Button>
+                              )
                             )}
                           </td>
                         </tr>
@@ -621,7 +726,8 @@ export default function ProcurementConsoleClient() {
                       <th className="p-3">PO Number</th>
                       <th className="p-3">Vendor</th>
                       <th className="p-3">Items / Progress</th>
-                      <th className="p-3">Total Amount</th>
+                      <th className="p-3">PO Total</th>
+                      <th className="p-3">Billed</th>
                       <th className="p-3">Status</th>
                       <th className="p-3">Delivery Date</th>
                       <th className="p-3 text-right">Actions</th>
@@ -630,26 +736,47 @@ export default function ProcurementConsoleClient() {
                   <tbody className="divide-y divide-resort-sand/20">
                     {orders.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-resort-stone">
+                        <td colSpan={8} className="p-8 text-center text-resort-stone">
                           No purchase orders found. Click "Issue PO" to create one.
                         </td>
                       </tr>
                     ) : (
                       orders.map((po) => (
                         <tr key={po.id} className="hover:bg-resort-ivory/30">
-                          <td className="p-3 font-semibold text-blue-900">{po.poNumber}</td>
+                          <td className="p-3 font-semibold text-blue-900">
+                            <button
+                              onClick={() => handleViewPoDetails(po.id)}
+                              className="hover:underline text-left font-semibold text-blue-900 flex items-center gap-1"
+                              title="Click to view lifecycle & reconciliation"
+                            >
+                              {po.poNumber}
+                            </button>
+                          </td>
                           <td className="p-3">
-                            <div className="font-medium text-resort-charcoal">{po.vendor.name}</div>
-                            <div className="text-[11px] text-resort-stone">{po.vendor.companyName}</div>
+                            <div className="font-medium text-resort-charcoal">{po.vendor?.name}</div>
+                            <div className="text-[11px] text-resort-stone">{po.vendor?.companyName}</div>
                           </td>
                           <td className="p-3">
                             <span className="font-medium">{po.items?.length || 0} lines</span>
                             <div className="text-[10px] text-resort-stone">
-                              Recv Progress: {po.items?.reduce((s: number, i: any) => s + parseFloat(i.receivedQuantity || 0), 0)} /{' '}
-                              {po.items?.reduce((s: number, i: any) => s + parseFloat(i.orderedQuantity || 0), 0)} units
+                              Recv: {po.totalReceivedQuantity || po.items?.reduce((s: number, i: any) => s + parseFloat(i.receivedQuantity || 0), 0)} /{' '}
+                              {po.totalOrderedQuantity || po.items?.reduce((s: number, i: any) => s + parseFloat(i.orderedQuantity || 0), 0)} units
                             </div>
+                            {po.remainingReceivable !== undefined && parseFloat(po.remainingReceivable) > 0 && (
+                              <div className="text-[10px] text-amber-700 font-medium">
+                                Rem: {po.remainingReceivable} units
+                              </div>
+                            )}
                           </td>
                           <td className="p-3 font-semibold text-resort-charcoal">₹{po.totalAmount}</td>
+                          <td className="p-3">
+                            <div className="font-semibold text-purple-900">₹{po.billedAmount || '0.00'}</div>
+                            {po.unbilledAmount && parseFloat(po.unbilledAmount) > 0 ? (
+                              <div className="text-[10px] text-resort-stone">Unbilled: ₹{po.unbilledAmount}</div>
+                            ) : (
+                              <div className="text-[10px] text-emerald-700 font-medium">Fully Billed</div>
+                            )}
+                          </td>
                           <td className="p-3">
                             <Badge
                               variant="outline"
@@ -669,7 +796,15 @@ export default function ProcurementConsoleClient() {
                           <td className="p-3 text-resort-stone">
                             {po.expectedDate ? new Date(po.expectedDate).toLocaleDateString() : 'N/A'}
                           </td>
-                          <td className="p-3 text-right space-x-1.5">
+                          <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewPoDetails(po.id)}
+                              className="h-6 text-[10px] border-resort-sand hover:bg-resort-ivory text-resort-charcoal"
+                            >
+                              <Eye className="w-3 h-3 mr-1 inline" /> Details
+                            </Button>
                             {po.status === 'DRAFT' && (
                               <Button
                                 size="sm"
@@ -720,39 +855,91 @@ export default function ProcurementConsoleClient() {
                       <th className="p-3">Received By</th>
                       <th className="p-3">Date</th>
                       <th className="p-3">Status</th>
+                      <th className="p-3">Linked Bill</th>
+                      <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-resort-sand/20">
                     {grns.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-resort-stone">
+                        <td colSpan={9} className="p-8 text-center text-resort-stone">
                           No Goods Receipt Notes generated yet. Issue a PO and click "Receive Goods (GRN)".
                         </td>
                       </tr>
                     ) : (
-                      grns.map((g) => (
-                        <tr key={g.id} className="hover:bg-resort-ivory/30">
-                          <td className="p-3 font-semibold text-emerald-900">{g.grnNumber}</td>
-                          <td className="p-3 font-medium text-blue-900">{g.purchaseOrder?.poNumber || 'Direct GRN'}</td>
-                          <td className="p-3">
-                            {g.store?.name} ({g.store?.code})
-                          </td>
-                          <td className="p-3">
-                            <div className="text-[11px] text-resort-charcoal">
-                              Accepted: <span className="font-bold text-emerald-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.acceptedQuantity || 0), 0)}</span> |{' '}
-                              Rejected: <span className="font-bold text-rose-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.rejectedQuantity || 0), 0)}</span> |{' '}
-                              Damaged: <span className="font-bold text-amber-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.damagedQuantity || 0), 0)}</span>
-                            </div>
-                          </td>
-                          <td className="p-3 text-resort-stone">{g.receivedBy?.name || 'Staff'}</td>
-                          <td className="p-3 text-resort-stone">{new Date(g.receivedAt).toLocaleDateString()}</td>
-                          <td className="p-3">
-                            <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-800 border-emerald-300">
-                              {g.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
+                      grns.map((g) => {
+                        const hasBills = g.purchaseBills && g.purchaseBills.length > 0;
+                        return (
+                          <tr key={g.id} className="hover:bg-resort-ivory/30">
+                            <td className="p-3 font-semibold text-emerald-900">{g.grnNumber}</td>
+                            <td className="p-3 font-medium text-blue-900">
+                              {g.po?.poNumber || g.purchaseOrder?.poNumber || 'Direct GRN'}
+                            </td>
+                            <td className="p-3">
+                              {(() => {
+                                const store = g.store || g.stockMovements?.[0]?.store;
+                                if (!store) return <span className="text-resort-stone">Default Store</span>;
+                                return `${store.name} (${store.code})`;
+                              })()}
+                            </td>
+                            <td className="p-3">
+                              <div className="text-[11px] text-resort-charcoal">
+                                Accepted: <span className="font-bold text-emerald-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.acceptedQuantity || 0), 0)}</span> |{' '}
+                                Rejected: <span className="font-bold text-rose-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.rejectedQuantity || 0), 0)}</span> |{' '}
+                                Damaged: <span className="font-bold text-amber-700">{g.items?.reduce((s: number, i: any) => s + parseFloat(i.damagedQuantity || 0), 0)}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 text-resort-stone">{g.receivedBy?.name || 'Staff'}</td>
+                            <td className="p-3 text-resort-stone">
+                              {g.receivedDate || g.receivedAt || g.createdAt
+                                ? new Date(g.receivedDate || g.receivedAt || g.createdAt).toLocaleDateString()
+                                : 'N/A'}
+                            </td>
+                            <td className="p-3">
+                              <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-800 border-emerald-300">
+                                {g.status}
+                              </Badge>
+                            </td>
+                            <td className="p-3">
+                              {hasBills ? (
+                                <div className="space-y-0.5">
+                                  {g.purchaseBills.map((pb: any) => (
+                                    <Badge
+                                      key={pb.id}
+                                      variant="outline"
+                                      className="text-[10px] bg-purple-50 text-purple-800 border-purple-200 block w-fit"
+                                    >
+                                      {pb.billNumber}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-stone-400 italic">Not Billed</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              {hasBills ? (
+                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">
+                                  Billed
+                                </span>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedGrnForBill(g);
+                                    setSelectedPoForBill(g.po || null);
+                                    setIsBillModalOpen(true);
+                                  }}
+                                  disabled={actionLoading}
+                                  className="h-6 text-[10px] bg-purple-700 hover:bg-purple-800 text-white"
+                                >
+                                  <ReceiptText className="w-3 h-3 mr-1 inline" /> Enter Bill
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -814,6 +1001,15 @@ export default function ProcurementConsoleClient() {
                             </Badge>
                           </td>
                           <td className="p-3 text-right space-x-1.5">
+                            {/* View Bill (always visible) */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => { setSelectedBillForDetail(b); setIsBillDetailModalOpen(true); }}
+                              className="h-6 text-[10px] border-resort-sand text-resort-charcoal hover:bg-resort-sand/20"
+                            >
+                              <Eye className="w-3 h-3 mr-1" /> View
+                            </Button>
                             {b.status === 'PENDING_VERIFICATION' && (
                               <Button
                                 size="sm"
@@ -827,7 +1023,7 @@ export default function ProcurementConsoleClient() {
                             {parseFloat(b.balanceDue) > 0 && (
                               <Button
                                 size="sm"
-                                onClick={() => setIsPaymentModalOpen(true)}
+                                onClick={() => handleOpenPaymentModal(b.vendor?.id, b)}
                                 className="h-6 text-[10px] bg-emerald-700 hover:bg-emerald-800 text-white"
                               >
                                 Pay
@@ -848,8 +1044,8 @@ export default function ProcurementConsoleClient() {
             <Card className="border-resort-sand bg-white shadow-sm overflow-hidden">
               <div className="p-3 border-b border-resort-sand/50 flex justify-between items-center bg-resort-ivory/20">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-resort-charcoal">Vendor Payments & Allocations</h3>
-                <Button size="sm" onClick={() => setIsPaymentModalOpen(true)} className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white">
-                  <DollarSign className="w-3.5 h-3.5 mr-1" /> Record Payment
+                <Button size="sm" onClick={() => handleOpenPaymentModal()} className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white">
+                  <IndianRupee className="w-3.5 h-3.5 mr-1" /> Record Payment
                 </Button>
               </div>
               <div className="overflow-x-auto">
@@ -979,15 +1175,27 @@ export default function ProcurementConsoleClient() {
         isOpen={isPrModalOpen}
         onClose={() => setIsPrModalOpen(false)}
         items={lookupItems}
+        categories={lookupCategories}
+        units={lookupUnits}
         onSubmit={handleCreatePr}
+        onItemCreated={(newItem) => {
+          setLookupItems((prev) => {
+            if (prev.some((it) => it.id === newItem.id)) return prev;
+            return [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name));
+          });
+        }}
         loading={actionLoading}
       />
 
       <CreatePoModal
         isOpen={isPoModalOpen}
-        onClose={() => setIsPoModalOpen(false)}
+        onClose={() => {
+          setIsPoModalOpen(false);
+          setSelectedPrForPo(null);
+        }}
         vendors={lookupVendors}
         items={lookupItems}
+        initialPr={selectedPrForPo}
         onSubmit={handleCreatePo}
         loading={actionLoading}
       />
@@ -1006,20 +1214,36 @@ export default function ProcurementConsoleClient() {
 
       <CreateBillModal
         isOpen={isBillModalOpen}
-        onClose={() => setIsBillModalOpen(false)}
+        onClose={() => {
+          setIsBillModalOpen(false);
+          setSelectedPoForBill(null);
+          setSelectedGrnForBill(null);
+        }}
         vendors={lookupVendors}
         purchaseOrders={orders}
+        goodsReceipts={grns}
+        initialPo={selectedPoForBill}
+        initialGrn={selectedGrnForBill}
         onSubmit={handleCreateBill}
         loading={actionLoading}
       />
 
       <CreatePaymentModal
         isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
+        onClose={() => { setIsPaymentModalOpen(false); setSelectedPaymentVendorId(undefined); setSelectedPrefilledBill(null); }}
         vendors={lookupVendors}
         unpaidBills={bills}
+        initialVendorId={selectedPaymentVendorId}
+        prefilledBill={selectedPrefilledBill}
         onSubmit={handleCreatePayment}
         loading={actionLoading}
+      />
+
+      <PurchaseBillDetailModal
+        isOpen={isBillDetailModalOpen}
+        onClose={() => { setIsBillDetailModalOpen(false); setSelectedBillForDetail(null); }}
+        bill={selectedBillForDetail}
+        onPay={(bill) => handleOpenPaymentModal(bill.vendor?.id, bill)}
       />
 
       <CreateVendorModal
@@ -1027,6 +1251,29 @@ export default function ProcurementConsoleClient() {
         onClose={() => setIsVendorModalOpen(false)}
         onSubmit={handleCreateVendor}
         loading={actionLoading}
+      />
+
+      <PurchaseOrderDetailModal
+        isOpen={isPoDetailModalOpen}
+        onClose={() => {
+          setIsPoDetailModalOpen(false);
+          setPoDetailsData(null);
+        }}
+        details={poDetailsData}
+        loading={poDetailsLoading}
+        onReceiveGoods={(po) => {
+          setIsPoDetailModalOpen(false);
+          const found = orders.find((o) => o.id === po.poId || o.id === po.id);
+          if (found) {
+            handleOpenGrnModal(found);
+          }
+        }}
+        onEnterBill={(po, grn) => {
+          setIsPoDetailModalOpen(false);
+          setSelectedPoForBill(po);
+          if (grn) setSelectedGrnForBill(grn);
+          setIsBillModalOpen(true);
+        }}
       />
     </div>
   );

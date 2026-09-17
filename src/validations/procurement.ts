@@ -21,6 +21,13 @@ export const updateVendorSchema = createVendorSchema.partial().extend({
   isActive: z.boolean().optional(),
 });
 
+export const createQuickInventoryItemSchema = z.object({
+  name: z.string().trim().min(2, 'Item name must be at least 2 characters').max(150, 'Item name cannot exceed 150 characters'),
+  categoryId: z.string().cuid('Invalid category ID'),
+  unitId: z.string().cuid('Invalid unit ID'),
+  standardCost: z.coerce.number().min(0, 'Estimated standard cost cannot be negative').optional(),
+});
+
 export const purchaseRequestItemSchema = z.object({
   itemId: z.string().cuid('Invalid item ID'),
   quantity: z.coerce.number().positive('Quantity must be strictly positive (> 0)'),
@@ -50,7 +57,7 @@ export const createPurchaseOrderSchema = z.object({
 });
 
 export const grnItemInputSchema = z.object({
-  itemId: z.string().cuid('Invalid item ID'),
+  itemId: z.string().min(1, 'Item ID is required'),
   receivedQuantity: z.coerce.number().min(0, 'Received quantity cannot be negative'),
   acceptedQuantity: z.coerce.number().min(0, 'Accepted quantity cannot be negative'),
   rejectedQuantity: z.coerce.number().min(0, 'Rejected quantity cannot be negative').default(0),
@@ -60,8 +67,8 @@ export const grnItemInputSchema = z.object({
 });
 
 export const createGrnSchema = z.object({
-  poId: z.string().cuid('Invalid PO ID'),
-  storeId: z.string().cuid('Receiving store is required'),
+  poId: z.string().min(1, 'PO ID is required'),
+  storeId: z.string().min(1, 'Receiving store is required'),
   challanNumber: z.string().trim().max(100).optional().or(z.literal('')),
   challanDate: z.string().optional().or(z.literal('')),
   notes: z.string().trim().max(500).optional().or(z.literal('')),

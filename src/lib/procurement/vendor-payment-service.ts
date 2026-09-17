@@ -242,6 +242,10 @@ export async function createVendorPayment(input: CreateVendorPaymentInput) {
     );
 
     return payment;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   }).catch(async (err: any) => {
     // Database-level idempotency handling:
     // If a concurrent duplicate request hits @@unique([vendorId, transactionReference]),
@@ -381,7 +385,7 @@ export async function getProcurementKpis() {
       where: { status: 'PENDING_APPROVAL' },
     }),
     prisma.purchaseOrder.count({
-      where: { status: { in: ['ISSUED', 'PARTIALLY_RECEIVED'] } },
+      where: { status: { in: ['DRAFT', 'ISSUED', 'PARTIALLY_RECEIVED'] } },
     }),
     prisma.goodsReceipt.count(),
     prisma.purchaseBill.findMany({
@@ -406,13 +410,22 @@ export async function getProcurementKpis() {
   }
 
   return {
+    // Standard names expected by ProcurementKpis and ProcurementConsoleClient
+    pendingRequestsCount: pendingPRs,
+    openOrdersCount: openPOs,
+    grnThisMonthCount: recentGRNs,
+    unpaidBillsCount: unpaidBills.length,
+    totalOutstandingPayables: totalPayables.toFixed(2),
+    totalPaidThisMonth: '0.00',
+    activeVendorsCount,
+
+    // Aliases preserved for backwards compatibility
     pendingPRs,
     openPOs,
     recentGRNs,
-    unpaidBillsCount: unpaidBills.length,
     totalPayables: totalPayables.toFixed(2),
     overduePayables: overduePayables.toFixed(2),
     overdueCount,
-    activeVendorsCount,
   };
 }
+

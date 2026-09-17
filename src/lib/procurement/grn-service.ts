@@ -324,7 +324,22 @@ export async function getGoodsReceiptsList(options?: {
         },
       },
       stockMovements: {
-        select: { id: true, movementNumber: true, storeId: true, quantity: true },
+        select: {
+          id: true,
+          movementNumber: true,
+          storeId: true,
+          quantity: true,
+          store: { select: { id: true, name: true, code: true } },
+        },
+      },
+      purchaseBills: {
+        select: {
+          id: true,
+          billNumber: true,
+          vendorBillNo: true,
+          status: true,
+          totalAmount: true,
+        },
       },
     },
   });

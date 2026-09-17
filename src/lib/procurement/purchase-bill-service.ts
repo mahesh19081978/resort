@@ -171,6 +171,10 @@ export async function createPurchaseBill(input: CreatePurchaseBillInput) {
     );
 
     return bill;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 }
 

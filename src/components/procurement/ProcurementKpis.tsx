@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { FileText, ShoppingCart, Truck, ReceiptText, DollarSign, Users } from 'lucide-react';
+import { FileText, ShoppingCart, Truck, ReceiptText, IndianRupee, Users } from 'lucide-react';
+
 
 interface ProcurementKpisProps {
   kpis: {
@@ -69,7 +70,7 @@ export const ProcurementKpis: React.FC<ProcurementKpisProps> = ({ kpis }) => {
         <CardContent className="p-3.5">
           <div className="flex items-center justify-between text-resort-stone mb-1">
             <span className="text-[11px] font-medium tracking-wide uppercase">Payables Due</span>
-            <DollarSign className="w-4 h-4 text-rose-600" />
+            <IndianRupee className="w-4 h-4 text-rose-600" />
           </div>
           <div className="text-lg font-bold text-rose-700 truncate">₹{kpis.totalOutstandingPayables}</div>
           <p className="text-[10px] text-resort-stone mt-0.5">Total balance due</p>

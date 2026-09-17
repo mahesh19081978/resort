@@ -257,7 +257,7 @@ export async function getPurchaseRequestsList(options?: { status?: PurchaseReque
     ];
   }
 
-  return prisma.purchaseRequest.findMany({
+  const list = await prisma.purchaseRequest.findMany({
     where,
     orderBy: { createdAt: 'desc' },
     include: {
@@ -271,8 +271,52 @@ export async function getPurchaseRequestsList(options?: { status?: PurchaseReque
         },
       },
       purchaseOrders: {
-        select: { id: true, poNumber: true, status: true },
+        where: { status: { not: 'CANCELLED' } },
+        select: {
+          id: true,
+          poNumber: true,
+          status: true,
+          items: {
+            select: { itemId: true, orderedQuantity: true },
+          },
+        },
       },
     },
   });
+
+  return list.map((pr) => {
+    let totalEst = new Prisma.Decimal(0);
+    for (const it of pr.items) {
+      if (it.estimatedCost) {
+        const lineEst = new Prisma.Decimal(it.quantity).times(new Prisma.Decimal(it.estimatedCost));
+        totalEst = totalEst.plus(lineEst);
+      }
+    }
+
+    // Determine if all requested item quantities have been fulfilled by active POs
+    const activePos = pr.purchaseOrders || [];
+    const orderedQuantitiesByItem = new Map<string, Prisma.Decimal>();
+    for (const po of activePos) {
+      for (const poItem of po.items) {
+        const cur = orderedQuantitiesByItem.get(poItem.itemId) || new Prisma.Decimal(0);
+        orderedQuantitiesByItem.set(poItem.itemId, cur.plus(new Prisma.Decimal(poItem.orderedQuantity)));
+      }
+    }
+
+    const isFullyOrdered =
+      activePos.length > 0 &&
+      pr.items.every((reqItem) => {
+        const ordered = orderedQuantitiesByItem.get(reqItem.itemId) || new Prisma.Decimal(0);
+        return ordered.greaterThanOrEqualTo(new Prisma.Decimal(reqItem.quantity));
+      });
+
+    return {
+      ...pr,
+      totalEstimatedCost: totalEst.toFixed(2),
+      hasIssuedPo: activePos.length > 0,
+      isFullyOrdered,
+      activePoNumbers: activePos.map((po) => po.poNumber),
+    };
+  });
 }
+

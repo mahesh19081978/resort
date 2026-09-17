@@ -215,6 +215,10 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput) {
     );
 
     return po;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 }
 
@@ -257,6 +261,10 @@ export async function issuePurchaseOrder(poId: string, userId: string) {
     );
 
     return updated;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 }
 
@@ -382,9 +390,22 @@ export async function getPurchaseOrdersList(options?: {
       po.items.length > 0 &&
       po.items.every((it) => new Prisma.Decimal(it.receivedQuantity).greaterThanOrEqualTo(new Prisma.Decimal(it.orderedQuantity)));
 
+    const remainingReceivable = totalOrderedQty.minus(totalReceivedQty);
+
+    // Financial Reconciliation metrics
+    const poTotalAmount = new Prisma.Decimal(po.totalAmount);
+    let billedAmount = new Prisma.Decimal(0);
+    for (const b of po.purchaseBills) {
+      if (b.status !== 'CANCELLED') {
+        billedAmount = billedAmount.plus(new Prisma.Decimal(b.totalAmount));
+      }
+    }
+    const unbilledAmount = poTotalAmount.minus(billedAmount);
+
     return {
       id: po.id,
       poNumber: po.poNumber,
+      vendorId: po.vendorId,
       vendor: po.vendor,
       issuedBy: po.issuedBy,
       request: po.request,
@@ -398,9 +419,205 @@ export async function getPurchaseOrdersList(options?: {
       items: itemsProgress,
       totalOrderedQuantity: totalOrderedQty.toFixed(4),
       totalReceivedQuantity: totalReceivedQty.toFixed(4),
+      remainingReceivable: remainingReceivable.isNegative() ? '0.0000' : remainingReceivable.toFixed(4),
       isFullyReceived,
+      billedAmount: billedAmount.toFixed(2),
+      unbilledAmount: (unbilledAmount.isNegative() ? new Prisma.Decimal(0) : unbilledAmount).toFixed(2),
       goodsReceiptCount: po.goodsReceipts.length,
       purchaseBillCount: po.purchaseBills.length,
     };
   });
+}
+
+/**
+ * Authoritative Purchase Order Reconciliation Service.
+ * Computes complete Quantity, Financial, and Lifecycle Reconciliation across all linked GRNs and Bills.
+ */
+export async function getPurchaseOrderReconciliation(poId: string) {
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: poId },
+    include: {
+      vendor: { select: { id: true, name: true, companyName: true } },
+      items: {
+        include: {
+          item: { select: { id: true, name: true, code: true, baseUnit: true } },
+        },
+      },
+      goodsReceipts: {
+        include: {
+          items: {
+            include: { item: { select: { id: true, name: true } } },
+          },
+          purchaseBills: {
+            select: { id: true, billNumber: true, status: true, totalAmount: true },
+          },
+          stockMovements: {
+            select: { id: true, store: { select: { id: true, name: true, code: true } } },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+      purchaseBills: {
+        include: {
+          grn: { select: { id: true, grnNumber: true } },
+          allocations: {
+            include: {
+              vendorPayment: {
+                select: { id: true, paymentNumber: true, paymentDate: true, paymentMethod: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  });
+
+  if (!po) {
+    throw new Error(`Purchase order [${poId}] not found.`);
+  }
+
+  // 1. Quantity Reconciliation
+  let orderedQty = new Prisma.Decimal(0);
+  let receivedQty = new Prisma.Decimal(0);
+
+  const items = po.items.map((it) => {
+    const ord = new Prisma.Decimal(it.orderedQuantity);
+    const recv = new Prisma.Decimal(it.receivedQuantity);
+    const rem = ord.minus(recv);
+
+    orderedQty = orderedQty.plus(ord);
+    receivedQty = receivedQty.plus(recv);
+
+    return {
+      id: it.id,
+      itemId: it.itemId,
+      itemName: it.item.name,
+      itemCode: it.item.code,
+      unitName: it.item.baseUnit.name,
+      orderedQuantity: ord.toFixed(4),
+      receivedQuantity: recv.toFixed(4),
+      remainingReceivable: rem.isNegative() ? '0.0000' : rem.toFixed(4),
+      unitPrice: it.unitPrice.toFixed(2),
+      lineTotal: it.lineTotal.toFixed(2),
+    };
+  });
+
+  const remainingReceivable = orderedQty.minus(receivedQty);
+
+  // 2. Financial Reconciliation
+  const poTotalAmount = new Prisma.Decimal(po.totalAmount);
+  let billedAmount = new Prisma.Decimal(0);
+  let paidAmount = new Prisma.Decimal(0);
+  let outstandingPayable = new Prisma.Decimal(0);
+
+  const bills = po.purchaseBills.map((b) => {
+    const tot = new Prisma.Decimal(b.totalAmount);
+    const paid = new Prisma.Decimal(b.paidAmount);
+    const bal = new Prisma.Decimal(b.balanceDue);
+
+    if (b.status !== 'CANCELLED') {
+      billedAmount = billedAmount.plus(tot);
+      paidAmount = paidAmount.plus(paid);
+      outstandingPayable = outstandingPayable.plus(bal);
+    }
+
+    return {
+      id: b.id,
+      billNumber: b.billNumber,
+      vendorBillNo: b.vendorBillNo,
+      status: b.status,
+      billDate: b.billDate.toISOString(),
+      dueDate: b.dueDate.toISOString(),
+      totalAmount: tot.toFixed(2),
+      paidAmount: paid.toFixed(2),
+      balanceDue: bal.toFixed(2),
+      grnNumber: b.grn?.grnNumber || null,
+      allocations: b.allocations.map((a) => ({
+        id: a.id,
+        amountAllocated: a.amountAllocated.toFixed(2),
+        paymentNumber: a.vendorPayment.paymentNumber,
+        paymentDate: a.vendorPayment.paymentDate.toISOString(),
+        paymentMethod: a.vendorPayment.paymentMethod,
+      })),
+    };
+  });
+
+  const unbilledAmount = poTotalAmount.minus(billedAmount);
+
+  // 3. Deliveries (GRNs)
+  const deliveries = po.goodsReceipts.map((g) => {
+    let accepted = new Prisma.Decimal(0);
+    let rejected = new Prisma.Decimal(0);
+    let damaged = new Prisma.Decimal(0);
+
+    for (const gi of g.items) {
+      accepted = accepted.plus(new Prisma.Decimal(gi.acceptedQuantity));
+      rejected = rejected.plus(new Prisma.Decimal(gi.rejectedQuantity));
+      damaged = damaged.plus(new Prisma.Decimal(gi.damagedQuantity));
+    }
+
+    return {
+      id: g.id,
+      grnNumber: g.grnNumber,
+      status: g.status,
+      challanNumber: g.challanNumber,
+      receivedDate: g.receivedDate ? g.receivedDate.toISOString() : g.createdAt.toISOString(),
+      storeName: g.stockMovements?.[0]?.store?.name || 'Default Store',
+      acceptedQuantity: accepted.toFixed(4),
+      rejectedQuantity: rejected.toFixed(4),
+      damagedQuantity: damaged.toFixed(4),
+      linkedBills: g.purchaseBills.map((pb) => ({
+        id: pb.id,
+        billNumber: pb.billNumber,
+        status: pb.status,
+        totalAmount: pb.totalAmount.toFixed(2),
+      })),
+    };
+  });
+
+  // 4. Status Flags (Strictly segregated dimensions)
+  const isPartiallyReceived = receivedQty.greaterThan(0) && remainingReceivable.greaterThan(0);
+  const isFullyReceived = orderedQty.greaterThan(0) && remainingReceivable.lessThanOrEqualTo(0);
+
+  const isPartiallyBilled = billedAmount.greaterThan(0) && billedAmount.lessThan(poTotalAmount);
+  const isFullyBilled = poTotalAmount.greaterThan(0) && billedAmount.greaterThanOrEqualTo(poTotalAmount);
+
+  const isPartiallyPaid = paidAmount.greaterThan(0) && outstandingPayable.greaterThan(0);
+  const isFullyPaid = billedAmount.greaterThan(0) && outstandingPayable.lessThanOrEqualTo(0);
+
+  return {
+    poId: po.id,
+    poNumber: po.poNumber,
+    status: po.status,
+    vendor: po.vendor,
+    createdAt: po.createdAt.toISOString(),
+    expectedDate: po.expectedDate ? po.expectedDate.toISOString() : null,
+    notes: po.notes,
+
+    // Quantities
+    orderedQty: orderedQty.toFixed(4),
+    receivedQty: receivedQty.toFixed(4),
+    remainingReceivable: (remainingReceivable.isNegative() ? new Prisma.Decimal(0) : remainingReceivable).toFixed(4),
+
+    // Financials
+    poTotalAmount: poTotalAmount.toFixed(2),
+    billedAmount: billedAmount.toFixed(2),
+    unbilledAmount: (unbilledAmount.isNegative() ? new Prisma.Decimal(0) : unbilledAmount).toFixed(2),
+    paidAmount: paidAmount.toFixed(2),
+    outstandingPayable: (outstandingPayable.isNegative() ? new Prisma.Decimal(0) : outstandingPayable).toFixed(2),
+
+    // Independent Status Flags
+    isPartiallyReceived,
+    isFullyReceived,
+    isPartiallyBilled,
+    isFullyBilled,
+    isPartiallyPaid,
+    isFullyPaid,
+
+    // Records Breakdown
+    items,
+    deliveries,
+    bills,
+  };
 }
