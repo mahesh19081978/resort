@@ -556,3 +556,154 @@ export async function getStockRequestLookupDataAction(): Promise<ActionResponse>
     return { success: false, error: error instanceof Error ? error.message : 'Failed to load stock request lookups' };
   }
 }
+
+// ----------------------------------------------------------------------------
+// 10. PHYSICAL STORE MANAGEMENT ACTIONS
+// ----------------------------------------------------------------------------
+export async function createStoreAction(params: {
+  name: string;
+  code: string;
+  department: string;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:item:manage');
+
+    const name = params.name?.trim();
+    const code = params.code?.trim().toUpperCase();
+    const department = params.department?.trim();
+
+    if (!name || !code || !department) {
+      throw new Error('Name, code, and department are all required.');
+    }
+
+    const existing = await prisma.store.findUnique({ where: { code } });
+    if (existing) {
+      throw new Error(`Store with code "${code}" already exists.`);
+    }
+
+    const store = await prisma.store.create({
+      data: {
+        name,
+        code,
+        department,
+        isActive: true,
+      },
+    });
+
+    revalidatePath('/admin/inventory');
+    return { success: true, data: store };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to create physical store' };
+  }
+}
+
+export async function updateStoreAction(params: {
+  storeId: string;
+  name: string;
+  department: string;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:item:manage');
+
+    const name = params.name?.trim();
+    const department = params.department?.trim();
+
+    if (!name || !department) {
+      throw new Error('Name and department are required.');
+    }
+
+    const store = await prisma.store.update({
+      where: { id: params.storeId },
+      data: { name, department },
+    });
+
+    revalidatePath('/admin/inventory');
+    return { success: true, data: store };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to update physical store' };
+  }
+}
+
+export async function toggleStoreActiveAction(storeId: string): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:item:manage');
+
+    const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+
+    // If deactivating, ensure we don't deactivate Central Store
+    if (store.code === 'STORE-MAIN' && store.isActive) {
+      throw new Error('Central Warehouse Store (STORE-MAIN) cannot be deactivated.');
+    }
+
+    const updated = await prisma.store.update({
+      where: { id: storeId },
+      data: { isActive: !store.isActive },
+    });
+
+    revalidatePath('/admin/inventory');
+    return { success: true, data: updated };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to toggle store status' };
+  }
+}
+
+export async function deleteStoreAction(storeId: string): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:item:manage');
+
+    const store = await prisma.store.findUniqueOrThrow({
+      where: { id: storeId },
+      include: {
+        stocks: { where: { quantityOnHand: { gt: 0 } } },
+        _count: {
+          select: {
+            movements: true,
+            transfersFrom: true,
+            transfersTo: true,
+            stockRequestsFrom: true,
+            stockRequestsTo: true,
+          },
+        },
+      },
+    });
+
+    if (store.code === 'STORE-MAIN') {
+      throw new Error('Central Warehouse Store (STORE-MAIN) cannot be deleted.');
+    }
+
+    if (store.stocks.length > 0) {
+      throw new Error(`Cannot delete "${store.name}". It currently has ${store.stocks.length} item(s) with active stock.`);
+    }
+
+    const totalTransactions =
+      store._count.movements +
+      store._count.transfersFrom +
+      store._count.transfersTo +
+      store._count.stockRequestsFrom +
+      store._count.stockRequestsTo;
+
+    if (totalTransactions > 0) {
+      throw new Error(
+        `Cannot delete "${store.name}". It has ${totalTransactions} historical transaction records. You can deactivate it instead.`
+      );
+    }
+
+    // Clean any zero-balance stock rows
+    await prisma.stock.deleteMany({ where: { storeId } });
+
+    await prisma.store.delete({ where: { id: storeId } });
+
+    revalidatePath('/admin/inventory');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to delete store' };
+  }
+}

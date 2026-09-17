@@ -3,11 +3,31 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Boxes, Warehouse, ArrowLeftRight, ClipboardCheck, AlertTriangle, TrendingDown } from 'lucide-react';
 import Link from 'next/link';
+import StoreManagementModal from '@/components/inventory/StoreManagementModal';
 
 export const dynamic = 'force-dynamic';
 
 export default async function InventoryDashboardPage() {
-  const [stores, itemsCount, lowStockCount, movementsCount, pendingRequestsCount, recentRequests, recentTransfers, recentMovements] = await Promise.all([
+  const [allStoresForModal, stores, itemsCount, lowStockCount, movementsCount, pendingRequestsCount, recentRequests, recentTransfers, recentMovements] = await Promise.all([
+    prisma.store.findMany({
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        department: true,
+        isActive: true,
+        stocks: {
+          where: { quantityOnHand: { gt: 0 } },
+          select: { id: true },
+        },
+        _count: {
+          select: {
+            movements: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    }),
     prisma.store.findMany({
       where: { isActive: true },
       include: {
@@ -74,6 +94,17 @@ export default async function InventoryDashboardPage() {
           </p>
         </div>
         <div className="flex gap-2.5">
+          <StoreManagementModal
+            stores={allStoresForModal.map((s) => ({
+              id: s.id,
+              name: s.name,
+              code: s.code,
+              department: s.department,
+              isActive: s.isActive,
+              activeStockCount: s.stocks.length,
+              totalMovements: s._count.movements,
+            }))}
+          />
           <Link
             href="/admin/inventory/requests"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-resort-forest text-white text-xs font-semibold hover:bg-resort-forest/90 transition-colors shadow-sm"
