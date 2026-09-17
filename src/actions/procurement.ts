@@ -32,6 +32,8 @@ import {
   cancelPurchaseOrder,
   getPurchaseOrdersList,
   getPurchaseOrderReconciliation,
+  getPurchaseOrderDocumentHTML,
+  emailPurchaseOrder,
 } from '@/lib/procurement/purchase-order-service';
 import {
   createAndFinalizeGrn,
@@ -417,6 +419,30 @@ export async function getPurchaseOrderDetailsAction(poId: string) {
     return { success: true, details: serializeToPlainObject(details) };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to load purchase order reconciliation' };
+  }
+}
+
+export async function getPurchaseOrderDocumentAction(poId: string) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error('Unauthorized');
+
+  try {
+    const doc = await getPurchaseOrderDocumentHTML(poId);
+    return { success: true, html: doc.html, data: serializeToPlainObject(doc.data) };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to generate purchase order document' };
+  }
+}
+
+export async function emailPurchaseOrderAction(poId: string) {
+  const user = await getCurrentUser();
+  requirePermission(user, 'procurement:order:create');
+
+  try {
+    const res = await emailPurchaseOrder(poId, user!.id);
+    return { success: res.success, messageId: res.messageId, error: res.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to email purchase order' };
   }
 }
 

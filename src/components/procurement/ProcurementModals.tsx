@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, X, PackagePlus, Loader2 } from 'lucide-react';
+import { Plus, Trash2, X, PackagePlus, Loader2, Printer, Download, Mail, CheckCircle2, History, AlertCircle, FileText, Edit } from 'lucide-react';
 import { createQuickInventoryItemAction } from '@/actions/procurement';
 
 export interface LookupItem {
@@ -1817,19 +1817,22 @@ export function CreateBillModal({
 }
 
 // ----------------------------------------------------------------------
-// 6. Create Vendor Modal
+// 6. Create & Edit Vendor Modal
 // ----------------------------------------------------------------------
 export function CreateVendorModal({
   isOpen,
   onClose,
   onSubmit,
   loading,
+  initialData,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: any) => Promise<void>;
   loading: boolean;
+  initialData?: any;
 }) {
+  const isEditing = Boolean(initialData?.id);
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [contactPerson, setContactPerson] = useState('');
@@ -1842,12 +1845,45 @@ export function CreateVendorModal({
   const [bankName, setBankName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankIfsc, setBankIfsc] = useState('');
+  const [isActive, setIsActive] = useState(true);
+
+  useEffect(() => {
+    if (initialData) {
+      setName(initialData.name || '');
+      setCompanyName(initialData.companyName || '');
+      setContactPerson(initialData.contactPerson || '');
+      setPhone(initialData.phone || '');
+      setEmail(initialData.email || '');
+      setAddress(initialData.address || '');
+      setGstin(initialData.gstin || '');
+      setPan(initialData.pan || '');
+      setPaymentTermsDays(initialData.paymentTermsDays ?? 30);
+      setBankName(initialData.bankName || '');
+      setBankAccountNumber(initialData.bankAccountNumber || '');
+      setBankIfsc(initialData.bankIfsc || '');
+      setIsActive(initialData.isActive ?? true);
+    } else {
+      setName('');
+      setCompanyName('');
+      setContactPerson('');
+      setPhone('');
+      setEmail('');
+      setAddress('');
+      setGstin('');
+      setPan('');
+      setPaymentTermsDays(30);
+      setBankName('');
+      setBankAccountNumber('');
+      setBankIfsc('');
+      setIsActive(true);
+    }
+  }, [initialData, isOpen]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSubmit({
+    const payload: any = {
       name,
       companyName,
       contactPerson: contactPerson || undefined,
@@ -1860,7 +1896,12 @@ export function CreateVendorModal({
       bankName: bankName || undefined,
       bankAccountNumber: bankAccountNumber || undefined,
       bankIfsc: bankIfsc || undefined,
-    });
+    };
+    if (isEditing) {
+      payload.vendorId = initialData.id;
+      payload.isActive = isActive;
+    }
+    await onSubmit(payload);
   };
 
   return (
@@ -1868,9 +1909,13 @@ export function CreateVendorModal({
       <div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-xl max-h-[90vh] flex flex-col border border-resort-sand">
         <div className="flex justify-between items-center pb-3 border-b border-resort-sand/50">
           <div>
-            <h3 className="font-serif text-lg font-bold text-resort-charcoal">Onboard New Vendor</h3>
+            <h3 className="font-serif text-lg font-bold text-resort-charcoal">
+              {isEditing ? `Edit Vendor — ${initialData.vendorCode || initialData.name}` : 'Onboard New Vendor'}
+            </h3>
             <p className="text-xs text-resort-stone">
-              System generates a unique sequential VND number with statutory tax details.
+              {isEditing
+                ? 'Update commercial profile, tax credentials, and banking details.'
+                : 'System generates a unique sequential VND number with statutory tax details.'}
             </p>
           </div>
           <button onClick={onClose} className="text-resort-stone hover:text-resort-charcoal">
@@ -2006,12 +2051,27 @@ export function CreateVendorModal({
             </div>
           </div>
 
+          {isEditing && (
+            <div className="flex items-center gap-2 pt-2">
+              <input
+                type="checkbox"
+                id="vendorIsActive"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="rounded border-resort-sand text-blue-700 focus:ring-blue-600 h-4 w-4"
+              />
+              <Label htmlFor="vendorIsActive" className="text-xs font-medium text-resort-charcoal cursor-pointer">
+                Vendor is active and available for new Purchase Orders
+              </Label>
+            </div>
+          )}
+
           <div className="pt-3 border-t border-resort-sand/50 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={loading} className="text-xs">
               Cancel
             </Button>
             <Button type="submit" disabled={loading} className="text-xs bg-resort-charcoal hover:bg-black text-white">
-              {loading ? 'Creating...' : 'Register Vendor'}
+              {loading ? (isEditing ? 'Saving...' : 'Creating...') : isEditing ? 'Save Changes' : 'Register Vendor'}
             </Button>
           </div>
         </form>
@@ -2022,7 +2082,6 @@ export function CreateVendorModal({
 
 // ----------------------------------------------------------------------
 // 7. Purchase Order Details & Reconciliation Modal
-// ----------------------------------------------------------------------
 export function PurchaseOrderDetailModal({
   isOpen,
   onClose,
@@ -2030,6 +2089,8 @@ export function PurchaseOrderDetailModal({
   loading,
   onReceiveGoods,
   onEnterBill,
+  onIssuePo,
+  onEmailPo,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -2037,27 +2098,85 @@ export function PurchaseOrderDetailModal({
   loading: boolean;
   onReceiveGoods?: (po: any) => void;
   onEnterBill?: (po: any, grn?: any) => void;
+  onIssuePo?: (poId: string) => void;
+  onEmailPo?: (po: any) => void;
 }) {
+  const [activeView, setActiveView] = useState<'reconciliation' | 'document'>('reconciliation');
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
+  const handlePrint = () => {
+    if (!details?.poId) return;
+    window.open(`/api/procurement/po-pdf?poId=${details.poId}&preview=true`, '_blank');
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!details?.poId) return;
+    setDownloadingPdf(true);
+    setPdfError(null);
+    try {
+      const response = await fetch(`/api/procurement/po-pdf?poId=${details.poId}&download=true`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData.error === 'PDF_ENGINE_UNAVAILABLE') {
+          setPdfError('Direct PDF generation is unavailable. Please click [Print PO] to save as PDF via your browser.');
+        } else {
+          setPdfError(errorData.message || errorData.error || 'Failed to download PDF.');
+        }
+        return;
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${details.poNumber || 'PO'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      setPdfError(err?.message || 'Error occurred downloading PDF.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full p-6 shadow-xl max-h-[92vh] flex flex-col border border-resort-sand">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4">
+      <div className="bg-white rounded-lg max-w-6xl w-full h-[94vh] p-5 shadow-2xl flex flex-col border border-resort-sand">
+        {/* Modal Header */}
         <div className="flex justify-between items-center pb-3 border-b border-resort-sand/50">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-serif text-lg font-bold text-resort-charcoal">
-                Purchase Order Details - {details?.poNumber || '...'}
+                Purchase Order {details?.poNumber || '...'}
               </h3>
               {details && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-blue-50 text-blue-800 border border-blue-200">
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${
+                    details.status === 'DRAFT'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                      : details.status === 'ISSUED'
+                      ? 'bg-blue-50 text-blue-800 border-blue-300'
+                      : details.status === 'FULLY_RECEIVED'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-stone-50 text-stone-700 border-stone-300'
+                  }`}
+                >
                   {details.status}
                 </span>
               )}
             </div>
             <p className="text-xs text-resort-stone">
-              Vendor: {details?.vendor?.name} ({details?.vendor?.companyName}) • Created:{' '}
-              {details?.createdAt ? new Date(details.createdAt).toLocaleDateString() : 'N/A'}
+              Vendor: <strong className="text-resort-charcoal">{details?.vendor?.name}</strong> • Order Date:{' '}
+              {details?.createdAt ? new Date(details.createdAt).toLocaleDateString('en-IN') : 'N/A'}
+              {details?.issuedAt && (
+                <span className="ml-2 text-emerald-700">
+                  • Issued: {new Date(details.issuedAt).toLocaleDateString('en-IN')} by {details.issuedByName}
+                </span>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="text-resort-stone hover:text-resort-charcoal">
@@ -2065,11 +2184,114 @@ export function PurchaseOrderDetailModal({
           </button>
         </div>
 
+        {/* View Switcher & Action Toolbar */}
+        <div className="flex justify-between items-center py-2.5 px-1 border-b border-resort-sand/40 bg-resort-ivory/20">
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={activeView === 'reconciliation' ? 'primary' : 'outline'}
+              onClick={() => setActiveView('reconciliation')}
+              className={`h-7 text-xs ${
+                activeView === 'reconciliation' ? 'bg-blue-700 text-white' : 'border-resort-sand'
+              }`}
+            >
+              Reconciliation & Lifecycle
+            </Button>
+            <Button
+              size="sm"
+              variant={activeView === 'document' ? 'primary' : 'outline'}
+              onClick={() => setActiveView('document')}
+              className={`h-7 text-xs ${
+                activeView === 'document' ? 'bg-blue-700 text-white' : 'border-resort-sand'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 mr-1" /> Official PO Document
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {details?.status === 'DRAFT' && onIssuePo && (
+              <Button
+                size="sm"
+                onClick={() => onIssuePo(details.poId)}
+                className="h-7 text-xs bg-blue-700 hover:bg-blue-800 text-white"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Issue PO
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrint}
+              disabled={loading || !details}
+              className="h-7 text-xs border-resort-sand hover:bg-resort-ivory text-resort-charcoal"
+            >
+              <Printer className="w-3.5 h-3.5 mr-1" /> Print PO
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadPdf}
+              disabled={loading || !details || downloadingPdf}
+              className="h-7 text-xs border-resort-sand hover:bg-resort-ivory text-resort-charcoal"
+            >
+              {downloadingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 mr-1" />
+              )}
+              Download PDF
+            </Button>
+
+            {onEmailPo && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onEmailPo(details)}
+                disabled={loading || !details || details.status === 'DRAFT' || details.status === 'ISSUED'}
+                title={
+                  details?.status === 'DRAFT'
+                    ? 'Must issue PO before emailing'
+                    : details?.status === 'ISSUED'
+                    ? 'PO has already been issued to vendor'
+                    : 'Email PO to Vendor'
+                }
+                className={`h-7 text-xs ${
+                  details?.status === 'DRAFT' || details?.status === 'ISSUED'
+                    ? 'border-stone-200 text-stone-400 bg-stone-50 cursor-not-allowed'
+                    : 'border-blue-300 text-blue-800 hover:bg-blue-50'
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5 mr-1" /> Email Vendor
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {pdfError && (
+          <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>{pdfError}</span>
+          </div>
+        )}
+
         {loading || !details ? (
           <div className="flex-1 flex items-center justify-center py-12 text-resort-stone text-sm">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading reconciliation...
+            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading purchase order details...
+          </div>
+        ) : activeView === 'document' ? (
+          /* Official PO Document Iframe Preview */
+          <div className="flex-1 w-full h-full min-h-[500px] overflow-hidden py-3">
+            <iframe
+              src={`/api/procurement/po-pdf?poId=${details.poId}&preview=true`}
+              className="w-full h-full border border-resort-sand/60 rounded bg-white shadow-inner"
+              title="Official PO Document"
+            />
           </div>
         ) : (
+          /* Reconciliation View */
           <div className="space-y-4 overflow-y-auto py-4 flex-1">
             {/* 1. Reconciliation Summary Cards */}
             <div className="grid grid-cols-4 gap-3">
@@ -2079,14 +2301,16 @@ export function PurchaseOrderDetailModal({
                   {details.receivedQty} / {details.orderedQty}
                 </div>
                 <div className="text-[11px] text-amber-700 font-medium">
-                  Remaining: {details.remainingReceivable}
+                  Remaining: {details.remainingReceivable} units
                 </div>
               </div>
 
               <div className="p-3 bg-resort-ivory/50 rounded border border-resort-sand/40">
                 <div className="text-[10px] uppercase font-semibold text-resort-stone">PO Total Value</div>
-                <div className="text-sm font-bold text-resort-charcoal mt-1">₹{details.poTotalAmount}</div>
-                <div className="text-[11px] text-resort-stone">Commercial commitment</div>
+                <div className="text-sm font-bold text-resort-charcoal mt-1">₹{details.totalAmount}</div>
+                <div className="text-[11px] text-resort-stone">
+                  Subtotal: ₹{details.subtotal} | Tax: ₹{details.taxAmount}
+                </div>
               </div>
 
               <div className="p-3 bg-resort-ivory/50 rounded border border-resort-sand/40">
@@ -2102,7 +2326,54 @@ export function PurchaseOrderDetailModal({
               </div>
             </div>
 
-            {/* 2. PO Line Items */}
+            {/* 2. Communication & Issuance History */}
+            {((details.emailHistory && details.emailHistory.length > 0) || details.issuedAt) && (
+              <div className="p-3 bg-blue-50/40 rounded border border-blue-200/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5" /> Document & Communication History
+                  </h4>
+                  {onEmailPo && details.status !== 'DRAFT' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onEmailPo(details)}
+                      className="h-6 text-[10px] border-blue-300 text-blue-800 bg-white hover:bg-blue-50"
+                    >
+                      Resend Email to Vendor
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-1 text-xs">
+                  {details.issuedAt && (
+                    <div className="flex justify-between items-center text-resort-charcoal py-0.5">
+                      <span>• Purchase Order Issued by <strong>{details.issuedByName}</strong></span>
+                      <span className="text-resort-stone text-[11px]">
+                        {new Date(details.issuedAt).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  )}
+                  {details.emailHistory?.map((eh: any) => (
+                    <div key={eh.id} className="flex justify-between items-center py-0.5 text-resort-charcoal">
+                      <span>
+                        • {eh.success ? (
+                          <span className="text-emerald-700 font-medium">Email dispatched</span>
+                        ) : (
+                          <span className="text-rose-700 font-medium">Email delivery failed</span>
+                        )}{' '}
+                        to <strong>{eh.recipientEmail}</strong> by {eh.userName}
+                        {eh.error && <span className="text-rose-600 block text-[10px] ml-2">Error: {eh.error}</span>}
+                      </span>
+                      <span className="text-resort-stone text-[11px]">
+                        {new Date(eh.createdAt).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. PO Line Items */}
             <div className="space-y-1.5">
               <h4 className="text-xs font-semibold text-resort-charcoal uppercase tracking-wider">
                 Order Line Items
@@ -2116,6 +2387,7 @@ export function PurchaseOrderDetailModal({
                       <th className="p-2">Received</th>
                       <th className="p-2">Remaining</th>
                       <th className="p-2 text-right">Unit Price</th>
+                      <th className="p-2 text-right">Tax</th>
                       <th className="p-2 text-right">Line Total</th>
                     </tr>
                   </thead>
@@ -2127,6 +2399,9 @@ export function PurchaseOrderDetailModal({
                         <td className="p-2 text-emerald-800 font-medium">{it.receivedQuantity} {it.unitName}</td>
                         <td className="p-2 text-amber-700 font-medium">{it.remainingReceivable} {it.unitName}</td>
                         <td className="p-2 text-right">₹{it.unitPrice}</td>
+                        <td className="p-2 text-right text-resort-stone">
+                          {parseFloat(it.taxRate) > 0 ? `${it.taxRate}% (₹${it.taxAmount})` : '0%'}
+                        </td>
                         <td className="p-2 text-right font-semibold">₹{it.lineTotal}</td>
                       </tr>
                     ))}
@@ -2135,7 +2410,7 @@ export function PurchaseOrderDetailModal({
               </div>
             </div>
 
-            {/* 3. Deliveries / Goods Receipts */}
+            {/* 4. Deliveries / Goods Receipts */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <h4 className="text-xs font-semibold text-resort-charcoal uppercase tracking-wider">
@@ -2174,7 +2449,7 @@ export function PurchaseOrderDetailModal({
                       {details.deliveries.map((del: any) => (
                         <tr key={del.id}>
                           <td className="p-2 font-semibold text-emerald-900">{del.grnNumber}</td>
-                          <td className="p-2 text-resort-stone">{new Date(del.receivedDate).toLocaleDateString()}</td>
+                          <td className="p-2 text-resort-stone">{new Date(del.receivedDate).toLocaleDateString('en-IN')}</td>
                           <td className="p-2">{del.storeName}</td>
                           <td className="p-2 font-bold text-emerald-700">{del.acceptedQuantity}</td>
                           <td className="p-2 text-resort-stone">{del.challanNumber || 'N/A'}</td>
@@ -2211,7 +2486,7 @@ export function PurchaseOrderDetailModal({
               )}
             </div>
 
-            {/* 4. Vendor Bills */}
+            {/* 5. Vendor Bills */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <h4 className="text-xs font-semibold text-resort-charcoal uppercase tracking-wider">
@@ -2253,8 +2528,8 @@ export function PurchaseOrderDetailModal({
                           <td className="p-2 font-semibold text-purple-900">{b.billNumber}</td>
                           <td className="p-2 font-medium">{b.vendorBillNo}</td>
                           <td className="p-2 text-emerald-800">{b.grnNumber || 'Consolidated / Direct'}</td>
-                          <td className="p-2 text-resort-stone">{new Date(b.billDate).toLocaleDateString()}</td>
-                          <td className="p-2 text-resort-stone">{new Date(b.dueDate).toLocaleDateString()}</td>
+                          <td className="p-2 text-resort-stone">{new Date(b.billDate).toLocaleDateString('en-IN')}</td>
+                          <td className="p-2 text-resort-stone">{new Date(b.dueDate).toLocaleDateString('en-IN')}</td>
                           <td className="p-2 font-bold text-resort-charcoal">₹{b.totalAmount}</td>
                           <td className="p-2 text-emerald-800">₹{b.paidAmount}</td>
                           <td className="p-2 font-bold text-rose-700">₹{b.balanceDue}</td>
@@ -2273,6 +2548,7 @@ export function PurchaseOrderDetailModal({
           </div>
         )}
 
+        {/* Modal Footer */}
         <div className="pt-3 border-t border-resort-sand/50 flex justify-end">
           <Button type="button" variant="outline" onClick={onClose} className="text-xs">
             Close
@@ -2283,5 +2559,96 @@ export function PurchaseOrderDetailModal({
   );
 }
 
+// ----------------------------------------------------------------------
+// 8. Email Purchase Order to Vendor Modal
+// ----------------------------------------------------------------------
+export function EmailPoModal({
+  isOpen,
+  onClose,
+  po,
+  onSend,
+  loading,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  po: any;
+  onSend: (poId: string) => Promise<void>;
+  loading: boolean;
+}) {
+  if (!isOpen || !po) return null;
 
+  const vendorEmail = (po.vendor?.email || po.vendorEmail || po.email)?.trim();
+  const vendorName = po.vendor?.name || po.vendorName || 'Vendor';
+  const hasValidEmail = Boolean(vendorEmail && vendorEmail.includes('@'));
 
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-lg max-w-lg w-full p-6 shadow-xl border border-resort-sand">
+        <div className="flex justify-between items-center pb-3 border-b border-resort-sand/50">
+          <div className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-blue-700" />
+            <h3 className="font-serif text-base font-bold text-resort-charcoal">
+              Email Purchase Order — {po.poNumber}
+            </h3>
+          </div>
+          <button onClick={onClose} className="text-resort-stone hover:text-resort-charcoal">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="py-4 space-y-4">
+          <div>
+            <Label className="text-xs font-semibold text-resort-charcoal">Authoritative Recipient</Label>
+            <div className="mt-1 p-2.5 bg-resort-ivory/40 border border-resort-sand/50 rounded">
+              <div className="font-medium text-xs text-resort-charcoal">{vendorName}</div>
+              {hasValidEmail ? (
+                <div className="text-xs text-blue-900 font-semibold mt-0.5">{vendorEmail}</div>
+              ) : (
+                <div className="text-xs text-rose-700 font-medium mt-0.5 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> No registered email address found for this vendor.
+                </div>
+              )}
+            </div>
+            {!hasValidEmail && (
+              <p className="text-[11px] text-rose-700 mt-1">
+                Please refresh your browser or use the Vendors tab &gt; [Edit] button to ensure the vendor profile has their official email saved.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1 text-xs text-resort-stone bg-stone-50 p-3 rounded border border-stone-200">
+            <div><strong>Subject:</strong> Purchase Order {po.poNumber} – Infinity Resort & Restaurant</div>
+            <div><strong>Attachment:</strong> {po.poNumber}.pdf (Official Signed Document)</div>
+            <div><strong>Order Total:</strong> ₹{po.totalAmount || po.poTotalAmount}</div>
+          </div>
+
+          <p className="text-[11px] text-resort-stone italic">
+            This action generates the authoritative A4 PDF and transmits it via transactional email service. The PO status will remain intact regardless of network delivery status.
+          </p>
+        </div>
+
+        <div className="pt-3 border-t border-resort-sand/50 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading} className="text-xs">
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={loading || !hasValidEmail}
+            onClick={() => onSend(po.id || po.poId)}
+            className="text-xs bg-blue-700 hover:bg-blue-800 text-white"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Sending...
+              </>
+            ) : (
+              <>
+                <Mail className="w-3.5 h-3.5 mr-1.5" /> Send Purchase Order
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -24,6 +24,22 @@ export interface ActionResponse<T = any> {
   error?: string;
 }
 
+/**
+ * Safely converts Prisma Decimals, Dates, and nested objects to plain JSON-serializable primitives
+ * to prevent Next.js Server Component -> Client Component serialization errors.
+ */
+function serializeForClient<T>(val: T): T {
+  if (val === null || val === undefined) return val;
+  return JSON.parse(
+    JSON.stringify(val, (_key, value) => {
+      if (typeof value === 'object' && value !== null && value.isDecimal) {
+        return Number(value.toString());
+      }
+      return value;
+    })
+  );
+}
+
 // ----------------------------------------------------------------------------
 // 1. OPENING BALANCE ACTION
 // ----------------------------------------------------------------------------
@@ -288,7 +304,7 @@ export async function createStockCountAction(params: {
     });
 
     revalidatePath('/admin/inventory');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to start stock count' };
   }
@@ -313,7 +329,7 @@ export async function recordStockCountItemsAction(params: {
     });
 
     revalidatePath('/admin/inventory');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to record count items' };
   }
@@ -334,7 +350,7 @@ export async function postStockCountAction(params: {
     });
 
     revalidatePath('/admin/inventory');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to post stock count' };
   }
@@ -368,7 +384,7 @@ export async function createStockRequestAction(params: {
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create stock request' };
   }
@@ -384,7 +400,7 @@ export async function submitStockRequestAction(requestId: string): Promise<Actio
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to submit stock request' };
   }
@@ -410,7 +426,7 @@ export async function approveStockRequestAction(params: {
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to approve stock request' };
   }
@@ -432,7 +448,7 @@ export async function rejectStockRequestAction(params: {
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to reject stock request' };
   }
@@ -453,7 +469,7 @@ export async function cancelStockRequestAction(params: {
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to cancel stock request' };
   }
@@ -480,7 +496,7 @@ export async function issueAndTransferStockAction(params: {
 
     revalidatePath('/admin/inventory');
     revalidatePath('/admin/inventory/requests');
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to issue/transfer stock' };
   }
@@ -500,7 +516,7 @@ export async function getStockRequestsAction(params?: {
     requirePermission(user, 'inventory:read');
 
     const result = await getStockRequestsList(params);
-    return { success: true, data: result };
+    return { success: true, data: serializeForClient(result) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to fetch stock requests' };
   }
@@ -705,5 +721,98 @@ export async function deleteStoreAction(storeId: string): Promise<ActionResponse
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete store' };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 11. INVENTORY OPERATIONS LOOKUP DATA (FOR QUICK ACTION MODALS)
+// ----------------------------------------------------------------------------
+export async function getOperationsLookupDataAction(): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
+    const [items, stores, allStocks] = await Promise.all([
+      prisma.inventoryItem.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          baseUnitId: true,
+          baseUnit: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.store.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, code: true, department: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.stock.findMany({
+        where: { quantityOnHand: { gt: 0 } },
+        select: { storeId: true, itemId: true, quantityOnHand: true },
+      }),
+    ]);
+
+    // StoreId -> ItemId -> quantityOnHand
+    const stockMap: Record<string, Record<string, string>> = {};
+    for (const s of allStocks) {
+      if (!stockMap[s.storeId]) stockMap[s.storeId] = {};
+      stockMap[s.storeId][s.itemId] = s.quantityOnHand.toFixed(4);
+    }
+
+    return {
+      success: true,
+      data: {
+        items,
+        stores,
+        stockMap,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to load operations lookup data' };
+  }
+}
+
+export async function performQuickStockCountAction(params: {
+  storeId: string;
+  itemId: string;
+  actualCount: number | string;
+  notes?: string | null;
+}): Promise<ActionResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    requirePermission(user, 'inventory:count:create');
+    requirePermission(user, 'inventory:count:post');
+
+    // 1. Create count session
+    const count = await createStockCount({
+      storeId: params.storeId,
+      notes: params.notes || 'Physical Stock Count Reconciliation',
+      userId: user.id,
+    });
+
+    if (!count) throw new Error('Failed to initiate stock count session.');
+
+    // 2. Record the actual physical count
+    await recordStockCountItems({
+      stockCountId: count.id,
+      items: [{ itemId: params.itemId, actualCount: params.actualCount }],
+      userId: user.id,
+    });
+
+    // 3. Post and reconcile variance into ledger
+    const postRes = await postStockCount({
+      stockCountId: count.id,
+      userId: user.id,
+      notes: params.notes || 'Physical Stock Count Reconciliation Post',
+    });
+
+    revalidatePath('/admin/inventory');
+    return { success: true, data: serializeForClient(postRes) };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to perform stock count reconciliation' };
   }
 }

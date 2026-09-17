@@ -22,10 +22,20 @@ export interface StoreSummary {
 
 export default function StoreManagementModal({
   stores,
+  isOpen: controlledIsOpen,
+  onClose: controlledOnClose,
 }: {
   stores: StoreSummary[];
+  isOpen?: boolean;
+  onClose?: () => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+  const setIsOpen = (open: boolean) => {
+    if (controlledOnClose && !open) controlledOnClose();
+    setInternalIsOpen(open);
+  };
+
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -127,18 +137,20 @@ export default function StoreManagementModal({
 
   return (
     <>
-      <button
-        onClick={() => {
-          setIsOpen(true);
-          setMode('list');
-          setError(null);
-          setSuccess(null);
-        }}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-white border border-border text-xs font-semibold text-resort-charcoal hover:bg-resort-sand/30 transition-colors shadow-sm"
-      >
-        <Warehouse className="w-4 h-4 text-resort-forest" />
-        Manage Physical Stores
-      </button>
+      {controlledIsOpen === undefined && (
+        <button
+          onClick={() => {
+            setIsOpen(true);
+            setMode('list');
+            setError(null);
+            setSuccess(null);
+          }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white border border-border text-xs font-semibold text-resort-charcoal hover:bg-stone-50 transition-colors shadow-2xs"
+        >
+          <Warehouse className="w-3.5 h-3.5 text-resort-forest" />
+          Manage Physical Stores
+        </button>
+      )}
 
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-150 backdrop-blur-xs">

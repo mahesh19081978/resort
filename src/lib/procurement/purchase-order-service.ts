@@ -2,6 +2,19 @@ import { prisma } from '@/lib/db/prisma';
 import { generateInventoryNumber } from '@/lib/inventory/numbers';
 import { recordAuditEvent } from '@/lib/auth/audit';
 import { Prisma, PurchaseOrderStatus, PurchaseRequestStatus } from '@prisma/client';
+import { generatePurchaseOrderHTML, AuthoritativePoDocumentData } from './po-document';
+import { renderHtmlToPdfBuffer } from '@/lib/pdf/render-pdf';
+import { sendEmail } from '@/lib/email/resend';
+
+function escapeHtml(str: string | null | undefined): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export interface CreatePurchaseOrderInput {
   vendorId: string;
@@ -339,7 +352,7 @@ export async function getPurchaseOrdersList(options?: {
     where,
     orderBy: { createdAt: 'desc' },
     include: {
-      vendor: { select: { id: true, name: true, companyName: true, phone: true } },
+      vendor: { select: { id: true, name: true, companyName: true, phone: true, email: true } },
       issuedBy: { select: { id: true, name: true, email: true } },
       request: { select: { id: true, requestNumber: true, department: true } },
       items: {
@@ -434,72 +447,105 @@ export async function getPurchaseOrdersList(options?: {
  * Computes complete Quantity, Financial, and Lifecycle Reconciliation across all linked GRNs and Bills.
  */
 export async function getPurchaseOrderReconciliation(poId: string) {
-  const po = await prisma.purchaseOrder.findUnique({
-    where: { id: poId },
-    include: {
-      vendor: { select: { id: true, name: true, companyName: true } },
-      items: {
-        include: {
-          item: { select: { id: true, name: true, code: true, baseUnit: true } },
-        },
-      },
-      goodsReceipts: {
-        include: {
-          items: {
-            include: { item: { select: { id: true, name: true } } },
-          },
-          purchaseBills: {
-            select: { id: true, billNumber: true, status: true, totalAmount: true },
-          },
-          stockMovements: {
-            select: { id: true, store: { select: { id: true, name: true, code: true } } },
+  const [po, property, invoiceConfig] = await Promise.all([
+    prisma.purchaseOrder.findUnique({
+      where: { id: poId },
+      include: {
+        vendor: true,
+        issuedBy: { select: { id: true, name: true, email: true } },
+        request: { select: { id: true, requestNumber: true, department: true } },
+        items: {
+          include: {
+            item: { select: { id: true, name: true, code: true, description: true, baseUnit: true } },
           },
         },
-        orderBy: { createdAt: 'desc' },
-      },
-      purchaseBills: {
-        include: {
-          grn: { select: { id: true, grnNumber: true } },
-          allocations: {
-            include: {
-              vendorPayment: {
-                select: { id: true, paymentNumber: true, paymentDate: true, paymentMethod: true },
+        goodsReceipts: {
+          include: {
+            items: {
+              include: { item: { select: { id: true, name: true } } },
+            },
+            purchaseBills: {
+              select: { id: true, billNumber: true, status: true, totalAmount: true },
+            },
+            stockMovements: {
+              select: { id: true, store: { select: { id: true, name: true, code: true, department: true } } },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        purchaseBills: {
+          include: {
+            grn: { select: { id: true, grnNumber: true } },
+            allocations: {
+              include: {
+                vendorPayment: {
+                  select: { id: true, paymentNumber: true, paymentDate: true, paymentMethod: true },
+                },
               },
             },
           },
+          orderBy: { createdAt: 'desc' },
         },
-        orderBy: { createdAt: 'desc' },
       },
-    },
-  });
+    }),
+    prisma.property.findFirst(),
+    prisma.invoiceConfig.findUnique({ where: { singletonKey: 'DEFAULT' } }),
+  ]);
 
   if (!po) {
     throw new Error(`Purchase order [${poId}] not found.`);
   }
 
+  // Fetch PO-related audit history (issuance, emails)
+  const auditLogs = await prisma.auditLog.findMany({
+    where: {
+      entity: 'PurchaseOrder',
+      entityId: po.id,
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const issuedEvent = auditLogs.find((l) => l.action === 'PURCHASE_ORDER_ISSUED');
+  const emailEvents = auditLogs.filter(
+    (l) => l.action === 'PURCHASE_ORDER_EMAILED' || l.action === 'PURCHASE_ORDER_EMAIL_FAILED'
+  );
+
   // 1. Quantity Reconciliation
   let orderedQty = new Prisma.Decimal(0);
   let receivedQty = new Prisma.Decimal(0);
 
-  const items = po.items.map((it) => {
+  const items = po.items.map((it, idx) => {
     const ord = new Prisma.Decimal(it.orderedQuantity);
     const recv = new Prisma.Decimal(it.receivedQuantity);
     const rem = ord.minus(recv);
+    const unitP = new Prisma.Decimal(it.unitPrice);
+    const taxR = new Prisma.Decimal(it.taxRate);
+    const lineTot = new Prisma.Decimal(it.lineTotal);
+
+    const baseAmount = ord.times(unitP);
+    const itemTaxAmount = lineTot.minus(baseAmount);
 
     orderedQty = orderedQty.plus(ord);
     receivedQty = receivedQty.plus(recv);
 
     return {
       id: it.id,
+      itemIndex: idx + 1,
       itemId: it.itemId,
       itemName: it.item.name,
       itemCode: it.item.code,
+      description: it.item.description,
       unitName: it.item.baseUnit.name,
       orderedQuantity: ord.toFixed(4),
       receivedQuantity: recv.toFixed(4),
       remainingReceivable: rem.isNegative() ? '0.0000' : rem.toFixed(4),
-      unitPrice: it.unitPrice.toFixed(2),
-      lineTotal: it.lineTotal.toFixed(2),
+      unitPrice: unitP.toFixed(2),
+      taxRate: taxR.toFixed(2),
+      taxAmount: (itemTaxAmount.isNegative() ? new Prisma.Decimal(0) : itemTaxAmount).toFixed(2),
+      lineTotal: lineTot.toFixed(2),
     };
   });
 
@@ -546,6 +592,10 @@ export async function getPurchaseOrderReconciliation(poId: string) {
   const unbilledAmount = poTotalAmount.minus(billedAmount);
 
   // 3. Deliveries (GRNs)
+  let deliveryStoreName: string | null = null;
+  let deliveryStoreCode: string | null = null;
+  let deliveryDepartment: string | null = null;
+
   const deliveries = po.goodsReceipts.map((g) => {
     let accepted = new Prisma.Decimal(0);
     let rejected = new Prisma.Decimal(0);
@@ -557,13 +607,20 @@ export async function getPurchaseOrderReconciliation(poId: string) {
       damaged = damaged.plus(new Prisma.Decimal(gi.damagedQuantity));
     }
 
+    const firstStore = g.stockMovements?.[0]?.store;
+    if (firstStore && !deliveryStoreName) {
+      deliveryStoreName = firstStore.name;
+      deliveryStoreCode = firstStore.code;
+      deliveryDepartment = firstStore.department;
+    }
+
     return {
       id: g.id,
       grnNumber: g.grnNumber,
       status: g.status,
       challanNumber: g.challanNumber,
       receivedDate: g.receivedDate ? g.receivedDate.toISOString() : g.createdAt.toISOString(),
-      storeName: g.stockMovements?.[0]?.store?.name || 'Default Store',
+      storeName: firstStore?.name || 'Default Store',
       acceptedQuantity: accepted.toFixed(4),
       rejectedQuantity: rejected.toFixed(4),
       damagedQuantity: damaged.toFixed(4),
@@ -576,6 +633,11 @@ export async function getPurchaseOrderReconciliation(poId: string) {
     };
   });
 
+  // If destination store not in GRN, check linked PR department
+  if (!deliveryDepartment && po.request?.department) {
+    deliveryDepartment = po.request.department;
+  }
+
   // 4. Status Flags (Strictly segregated dimensions)
   const isPartiallyReceived = receivedQty.greaterThan(0) && remainingReceivable.greaterThan(0);
   const isFullyReceived = orderedQty.greaterThan(0) && remainingReceivable.lessThanOrEqualTo(0);
@@ -586,14 +648,60 @@ export async function getPurchaseOrderReconciliation(poId: string) {
   const isPartiallyPaid = paidAmount.greaterThan(0) && outstandingPayable.greaterThan(0);
   const isFullyPaid = billedAmount.greaterThan(0) && outstandingPayable.lessThanOrEqualTo(0);
 
+  // Authoritative Property Profile (configured database record or canonical resort profile)
+  const authoritativeProperty = {
+    name: property?.name || 'Infinity Resort & Restaurant',
+    address: property?.address || '732/1, Mandleshwar Road, Near New Era College, Mhow',
+    city: property?.city || 'Mhow',
+    state: property?.state || 'Madhya Pradesh',
+    postalCode: property?.postalCode || '453441',
+    country: property?.country || 'India',
+    contactPhone: property?.contactPhone || '+91 98765 43210',
+    contactEmail: property?.contactEmail || 'purchase@infinityresort.com',
+    gstin: property?.gstin || '23AAAAA0000A1Z5',
+    logoUrl: property?.logoUrl || null,
+  };
+
   return {
     poId: po.id,
     poNumber: po.poNumber,
     status: po.status,
     vendor: po.vendor,
+    issuedBy: po.issuedBy,
+    request: po.request,
     createdAt: po.createdAt.toISOString(),
     expectedDate: po.expectedDate ? po.expectedDate.toISOString() : null,
     notes: po.notes,
+
+    // Audit Issuance & Email History
+    issuedAt: issuedEvent ? issuedEvent.createdAt.toISOString() : null,
+    issuedByName: issuedEvent?.user?.name || po.issuedBy?.name || 'Authorized Officer',
+    auditHistory: auditLogs.map((l) => ({
+      id: l.id,
+      action: l.action,
+      userName: l.user?.name || 'System',
+      userEmail: l.user?.email || null,
+      createdAt: l.createdAt.toISOString(),
+      metadata: l.newValues as any,
+    })),
+    emailHistory: emailEvents.map((l) => ({
+      id: l.id,
+      action: l.action,
+      success: l.action === 'PURCHASE_ORDER_EMAILED',
+      userName: l.user?.name || 'Authorized Staff',
+      createdAt: l.createdAt.toISOString(),
+      recipientEmail: (l.newValues as any)?.recipientEmail || po.vendor.email,
+      error: (l.newValues as any)?.error || null,
+    })),
+
+    // Authoritative Configuration & Destination
+    property: authoritativeProperty,
+    deliveryLocation: {
+      storeName: deliveryStoreName,
+      storeCode: deliveryStoreCode,
+      department: deliveryDepartment,
+    },
+    termsAndConditions: invoiceConfig?.termsAndConditions || null,
 
     // Quantities
     orderedQty: orderedQty.toFixed(4),
@@ -601,6 +709,9 @@ export async function getPurchaseOrderReconciliation(poId: string) {
     remainingReceivable: (remainingReceivable.isNegative() ? new Prisma.Decimal(0) : remainingReceivable).toFixed(4),
 
     // Financials
+    subtotal: po.subtotal.toFixed(2),
+    taxAmount: po.taxAmount.toFixed(2),
+    totalAmount: poTotalAmount.toFixed(2),
     poTotalAmount: poTotalAmount.toFixed(2),
     billedAmount: billedAmount.toFixed(2),
     unbilledAmount: (unbilledAmount.isNegative() ? new Prisma.Decimal(0) : unbilledAmount).toFixed(2),
@@ -620,4 +731,185 @@ export async function getPurchaseOrderReconciliation(poId: string) {
     deliveries,
     bills,
   };
+}
+
+/**
+ * Builds the authoritative document data structure and generates official HTML.
+ */
+export async function getPurchaseOrderDocumentHTML(poId: string): Promise<{
+  html: string;
+  data: AuthoritativePoDocumentData;
+}> {
+  const recon = await getPurchaseOrderReconciliation(poId);
+
+  const documentData: AuthoritativePoDocumentData = {
+    poId: recon.poId,
+    poNumber: recon.poNumber,
+    status: recon.status,
+    createdAt: recon.createdAt,
+    expectedDate: recon.expectedDate,
+    issuedAt: recon.issuedAt,
+    issuedByName: recon.issuedByName,
+    notes: recon.notes,
+    property: recon.property,
+    vendor: {
+      id: recon.vendor.id,
+      vendorCode: recon.vendor.vendorCode,
+      name: recon.vendor.name,
+      companyName: recon.vendor.companyName,
+      contactPerson: recon.vendor.contactPerson,
+      phone: recon.vendor.phone,
+      email: recon.vendor.email,
+      address: recon.vendor.address,
+      gstin: recon.vendor.gstin,
+      pan: recon.vendor.pan,
+    },
+    deliveryLocation: recon.deliveryLocation,
+    items: recon.items,
+    subtotal: recon.subtotal,
+    taxAmount: recon.taxAmount,
+    totalAmount: recon.totalAmount,
+    termsAndConditions: recon.termsAndConditions,
+  };
+
+  const html = generatePurchaseOrderHTML(documentData);
+  return { html, data: documentData };
+}
+
+/**
+ * Renders an authoritative A4 PDF buffer for a Purchase Order.
+ * Returns null if Chromium/Puppeteer is unavailable in the environment.
+ */
+export async function renderPurchaseOrderPdfBuffer(poId: string): Promise<{
+  buffer: Buffer | null;
+  filename: string;
+  poNumber: string;
+}> {
+  const { html, data } = await getPurchaseOrderDocumentHTML(poId);
+  const buffer = await renderHtmlToPdfBuffer(html, { format: 'A4' });
+  const filename = `${data.poNumber}.pdf`;
+  return { buffer, filename, poNumber: data.poNumber };
+}
+
+/**
+ * Emails an issued Purchase Order to the authoritative Vendor.email with PDF attachment.
+ *
+ * BUSINESS RULES:
+ * 1. PO must be in an issued or active state (ISSUED, PARTIALLY_RECEIVED, FULLY_RECEIVED, CLOSED).
+ * 2. Recipient MUST be the authoritative Vendor.email. No arbitrary overrides.
+ * 3. PO PDF attachment is generated strictly from the authoritative HTML document template.
+ * 4. AuditLog is written for PURCHASE_ORDER_EMAILED or PURCHASE_ORDER_EMAIL_FAILED.
+ * 5. Email failure NEVER mutates or cancels the PO status.
+ */
+export async function emailPurchaseOrder(
+  poId: string,
+  userId: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const recon = await getPurchaseOrderReconciliation(poId);
+
+  // 1. Status Check
+  if (recon.status === PurchaseOrderStatus.DRAFT) {
+    throw new Error(`Cannot email PO [${recon.poNumber}]: Purchase Order must be ISSUED before emailing to vendor.`);
+  }
+  if (recon.status === PurchaseOrderStatus.CANCELLED) {
+    throw new Error(`Cannot email cancelled Purchase Order [${recon.poNumber}].`);
+  }
+
+  // 2. Authoritative Vendor Email Check
+  const recipientEmail = recon.vendor.email?.trim();
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    const errorMsg = `Vendor [${recon.vendor.name}] does not have a registered email address. Please update the vendor profile before emailing.`;
+    await recordAuditEvent({
+      userId,
+      action: 'PURCHASE_ORDER_EMAIL_FAILED',
+      entity: 'PurchaseOrder',
+      entityId: poId,
+      newValues: {
+        poNumber: recon.poNumber,
+        vendorId: recon.vendor.id,
+        reason: 'MISSING_VENDOR_EMAIL',
+        error: errorMsg,
+      },
+    });
+    return { success: false, error: errorMsg };
+  }
+
+  // 3. Generate authoritative document and PDF
+  const { html, data } = await getPurchaseOrderDocumentHTML(poId);
+  const pdfBuffer = await renderHtmlToPdfBuffer(html, { format: 'A4' });
+
+  // 4. Compose Email Body
+  const expectedDateText = data.expectedDate ? new Date(data.expectedDate).toLocaleDateString('en-IN') : 'As agreed';
+  const emailSubject = `Purchase Order ${data.poNumber} – ${data.property.name}`;
+  const emailText = `Dear ${data.vendor.name},
+
+Please find attached Purchase Order ${data.poNumber} from ${data.property.name}.
+
+PO Number: ${data.poNumber}
+Total Amount: ₹${data.totalAmount}
+Expected Delivery: ${expectedDateText}
+
+Please acknowledge receipt of this purchase order and reference the PO number on your delivery challan and invoice.
+
+Regards,
+Materials & Procurement Department
+${data.property.name}`;
+
+  const attachments = pdfBuffer
+    ? [{ filename: `${data.poNumber}.pdf`, content: pdfBuffer }]
+    : [];
+
+  // 5. Transmit via Resend
+  const emailResult = await sendEmail({
+    to: recipientEmail,
+    subject: emailSubject,
+    text: emailText,
+    html: `<div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; font-size: 13px;">
+      <p>Dear <strong>${escapeHtml(data.vendor.name)}</strong>,</p>
+      <p>Please find attached Purchase Order <strong>${escapeHtml(data.poNumber)}</strong> from <strong>${escapeHtml(data.property.name)}</strong>.</p>
+      <table style="border-collapse: collapse; margin: 12px 0; font-size: 13px;">
+        <tr><td style="padding: 4px 8px; color: #666;">PO Number:</td><td style="padding: 4px 8px; font-weight: bold;">${escapeHtml(data.poNumber)}</td></tr>
+        <tr><td style="padding: 4px 8px; color: #666;">PO Total:</td><td style="padding: 4px 8px; font-weight: bold;">₹${escapeHtml(data.totalAmount)}</td></tr>
+        <tr><td style="padding: 4px 8px; color: #666;">Expected Delivery:</td><td style="padding: 4px 8px; font-weight: bold;">${escapeHtml(expectedDateText)}</td></tr>
+      </table>
+      <p>Please acknowledge receipt of this purchase order and kindly quote the PO number on all delivery challans and tax invoices.</p>
+      <br/>
+      <p style="margin: 0;">Regards,</p>
+      <p style="margin: 0; font-weight: bold;">Purchase Department</p>
+      <p style="margin: 0; color: #666;">${escapeHtml(data.property.name)}</p>
+    </div>`,
+    attachments,
+  });
+
+  // 6. Record Audit Event
+  if (emailResult.success) {
+    await recordAuditEvent({
+      userId,
+      action: 'PURCHASE_ORDER_EMAILED',
+      entity: 'PurchaseOrder',
+      entityId: poId,
+      newValues: {
+        poNumber: data.poNumber,
+        vendorId: data.vendor.id,
+        recipientEmail,
+        messageId: emailResult.messageId,
+        hasPdfAttachment: Boolean(pdfBuffer),
+      },
+    });
+    return { success: true, messageId: emailResult.messageId };
+  } else {
+    await recordAuditEvent({
+      userId,
+      action: 'PURCHASE_ORDER_EMAIL_FAILED',
+      entity: 'PurchaseOrder',
+      entityId: poId,
+      newValues: {
+        poNumber: data.poNumber,
+        vendorId: data.vendor.id,
+        recipientEmail,
+        error: emailResult.error,
+      },
+    });
+    return { success: false, error: emailResult.error || 'Failed to dispatch email to vendor.' };
+  }
 }

@@ -740,22 +740,23 @@ export async function updateRolePermissions(
       });
     }
 
-    // Add newly assigned permissions
-    for (const code of added) {
-      const permId = validPermissionMap.get(code);
-      if (permId) {
-        await tx.rolePermission.upsert({
-          where: {
-            roleId_permissionId: {
-              roleId: role.id,
-              permissionId: permId,
-            },
-          },
-          update: {},
-          create: {
+    // Add newly assigned permissions in a single fast batch
+    if (added.length > 0) {
+      const recordsToCreate: { roleId: string; permissionId: string }[] = [];
+      for (const code of added) {
+        const permId = validPermissionMap.get(code);
+        if (permId) {
+          recordsToCreate.push({
             roleId: role.id,
             permissionId: permId,
-          },
+          });
+        }
+      }
+
+      if (recordsToCreate.length > 0) {
+        await tx.rolePermission.createMany({
+          data: recordsToCreate,
+          skipDuplicates: true,
         });
       }
     }

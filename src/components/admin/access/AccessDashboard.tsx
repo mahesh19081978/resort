@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AdminPageHeader,
   AdminKpiCard,
@@ -183,13 +184,29 @@ export function AccessDashboard({
     await handleFilterSearch();
   };
 
+  const router = useRouter();
+
   const handleSaveRolePermissions = async (roleCode: string, permissionCodes: string[]) => {
     const res = await updateRolePermissionsAction({
       roleCode: roleCode as UserRole,
       permissionCodes,
     });
     if (!res.success) throw new Error(res.error || 'Failed to update role permissions');
+    
+    // Update local roles state immediately so UI cards and modal reflect changes
+    setRoles((prevRoles) =>
+      prevRoles.map((r) =>
+        r.code === roleCode
+          ? {
+              ...r,
+              permissionCount: permissionCodes.length,
+              permissions: permissionCodes,
+            }
+          : r
+      )
+    );
     showFeedback('success', `Role permissions for ${roleCode} updated successfully.`);
+    router.refresh();
   };
 
   const availableRolesList = roles.map((r) => ({ code: r.code, name: r.name }));

@@ -22,6 +22,10 @@ import {
   Building2,
   Package,
   Eye,
+  Printer,
+  Download,
+  Mail,
+  Edit,
 } from 'lucide-react';
 import { ProcurementKpis } from './ProcurementKpis';
 import {
@@ -33,6 +37,7 @@ import {
   PurchaseBillDetailModal,
   CreateVendorModal,
   PurchaseOrderDetailModal,
+  EmailPoModal,
   LookupItem,
   LookupStore,
   LookupVendor,
@@ -52,11 +57,13 @@ import {
   rejectPurchaseRequestAction,
   createPurchaseOrderAction,
   issuePurchaseOrderAction,
+  emailPurchaseOrderAction,
   createAndFinalizeGrnAction,
   createPurchaseBillAction,
   verifyPurchaseBillAction,
   createVendorPaymentAction,
   createVendorAction,
+  updateVendorAction,
 } from '@/actions/procurement';
 
 type ProcurementTab = 'overview' | 'requests' | 'orders' | 'grn' | 'bills' | 'payments' | 'vendors';
@@ -106,6 +113,7 @@ export default function ProcurementConsoleClient() {
   const [selectedPaymentVendorId, setSelectedPaymentVendorId] = useState<string | undefined>(undefined);
   const [selectedPrefilledBill, setSelectedPrefilledBill] = useState<any>(null);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
+  const [selectedVendorForEdit, setSelectedVendorForEdit] = useState<any>(null);
   const [isBillDetailModalOpen, setIsBillDetailModalOpen] = useState(false);
   const [selectedBillForDetail, setSelectedBillForDetail] = useState<any>(null);
   const [isPoDetailModalOpen, setIsPoDetailModalOpen] = useState(false);
@@ -284,9 +292,42 @@ export default function ProcurementConsoleClient() {
         showFeedback('success', 'Purchase Order marked as ISSUED.');
         refreshDashboard();
         loadTabData(activeTab);
+        if (isPoDetailModalOpen && poDetailsData?.poId === poId) {
+          handleViewPoDetails(poId);
+        }
       } else {
         showFeedback('error', res.error || 'Failed to issue PO');
       }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const [selectedPoForEmail, setSelectedPoForEmail] = useState<any>(null);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+
+  const handleOpenEmailModal = (po: any) => {
+    setSelectedPoForEmail(po);
+    setIsEmailModalOpen(true);
+  };
+
+  const handleSendPoEmail = async (poId: string) => {
+    setActionLoading(true);
+    try {
+      const res = await emailPurchaseOrderAction(poId);
+      if (res.success) {
+        showFeedback('success', `Purchase Order emailed to vendor successfully!`);
+        setIsEmailModalOpen(false);
+        refreshDashboard();
+        loadTabData(activeTab);
+        if (isPoDetailModalOpen && poDetailsData?.poId === poId) {
+          handleViewPoDetails(poId);
+        }
+      } else {
+        showFeedback('error', res.error || 'Failed to email Purchase Order');
+      }
+    } catch (err: any) {
+      showFeedback('error', err?.message || 'Error occurred emailing PO');
     } finally {
       setActionLoading(false);
     }
@@ -379,17 +420,19 @@ export default function ProcurementConsoleClient() {
     }
   };
 
-  const handleCreateVendor = async (data: any) => {
+  const handleSaveVendor = async (data: any) => {
     setActionLoading(true);
     try {
-      const res = await createVendorAction(data);
+      const isEditing = Boolean(data.vendorId);
+      const res = isEditing ? await updateVendorAction(data) : await createVendorAction(data);
       if (res.success) {
-        showFeedback('success', `Vendor registered successfully!`);
+        showFeedback('success', isEditing ? `Vendor updated successfully!` : `Vendor registered successfully!`);
         setIsVendorModalOpen(false);
+        setSelectedVendorForEdit(null);
         refreshDashboard();
         loadTabData(activeTab);
       } else {
-        showFeedback('error', res.error || 'Failed to register vendor');
+        showFeedback('error', res.error || (isEditing ? 'Failed to update vendor' : 'Failed to register vendor'));
       }
     } finally {
       setActionLoading(false);
@@ -805,6 +848,46 @@ export default function ProcurementConsoleClient() {
                             >
                               <Eye className="w-3 h-3 mr-1 inline" /> Details
                             </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => window.open(`/api/procurement/po-pdf?poId=${po.id}&preview=true`, '_blank')}
+                              title="Print Purchase Order"
+                              className="h-6 text-[10px] border-resort-sand hover:bg-resort-ivory text-resort-charcoal"
+                            >
+                              <Printer className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => window.open(`/api/procurement/po-pdf?poId=${po.id}&download=true`, '_blank')}
+                              title="Download PDF"
+                              className="h-6 text-[10px] border-resort-sand hover:bg-resort-ivory text-resort-charcoal"
+                            >
+                              <Download className="w-3 h-3" />
+                            </Button>
+                            {po.status !== 'CANCELLED' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleOpenEmailModal(po)}
+                                disabled={po.status === 'ISSUED' || po.status === 'DRAFT'}
+                                title={
+                                  po.status === 'DRAFT'
+                                    ? 'Must issue PO before emailing'
+                                    : po.status === 'ISSUED'
+                                    ? 'PO has already been issued to vendor'
+                                    : 'Email PO to Vendor'
+                                }
+                                className={`h-6 text-[10px] ${
+                                  po.status === 'ISSUED' || po.status === 'DRAFT'
+                                    ? 'border-stone-200 text-stone-400 bg-stone-50 cursor-not-allowed'
+                                    : 'border-blue-300 text-blue-800 hover:bg-blue-50'
+                                }`}
+                              >
+                                <Mail className="w-3 h-3" />
+                              </Button>
+                            )}
                             {po.status === 'DRAFT' && (
                               <Button
                                 size="sm"
@@ -1120,12 +1203,13 @@ export default function ProcurementConsoleClient() {
                       <th className="p-3">Total Billed</th>
                       <th className="p-3">Outstanding</th>
                       <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-resort-sand/20">
                     {vendorsList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-resort-stone">
+                        <td colSpan={8} className="p-8 text-center text-resort-stone">
                           No vendors found. Click "Onboard Vendor" to register your first supplier.
                         </td>
                       </tr>
@@ -1152,12 +1236,25 @@ export default function ProcurementConsoleClient() {
                               variant="outline"
                               className={`text-[10px] ${
                                 v.isActive
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                  : 'bg-stone-50 text-stone-700 border-stone-300'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                    : 'bg-stone-50 text-stone-700 border-stone-300'
                               }`}
                             >
                               {v.isActive ? 'ACTIVE' : 'INACTIVE'}
                             </Badge>
+                          </td>
+                          <td className="p-3 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setSelectedVendorForEdit(v);
+                                setIsVendorModalOpen(true);
+                              }}
+                              className="h-6 text-[11px] border-resort-sand text-resort-charcoal hover:bg-resort-sand/20 px-2"
+                            >
+                              <Edit className="w-3 h-3 mr-1 text-blue-700" /> Edit
+                            </Button>
                           </td>
                         </tr>
                       ))
@@ -1181,7 +1278,7 @@ export default function ProcurementConsoleClient() {
         onItemCreated={(newItem) => {
           setLookupItems((prev) => {
             if (prev.some((it) => it.id === newItem.id)) return prev;
-            return [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name));
+            return [...prev, newItem];
           });
         }}
         loading={actionLoading}
@@ -1248,8 +1345,12 @@ export default function ProcurementConsoleClient() {
 
       <CreateVendorModal
         isOpen={isVendorModalOpen}
-        onClose={() => setIsVendorModalOpen(false)}
-        onSubmit={handleCreateVendor}
+        onClose={() => {
+          setIsVendorModalOpen(false);
+          setSelectedVendorForEdit(null);
+        }}
+        initialData={selectedVendorForEdit}
+        onSubmit={handleSaveVendor}
         loading={actionLoading}
       />
 
@@ -1274,6 +1375,19 @@ export default function ProcurementConsoleClient() {
           if (grn) setSelectedGrnForBill(grn);
           setIsBillModalOpen(true);
         }}
+        onIssuePo={handleIssuePo}
+        onEmailPo={handleOpenEmailModal}
+      />
+
+      <EmailPoModal
+        isOpen={isEmailModalOpen}
+        onClose={() => {
+          setIsEmailModalOpen(false);
+          setSelectedPoForEmail(null);
+        }}
+        po={selectedPoForEmail}
+        onSend={handleSendPoEmail}
+        loading={actionLoading}
       />
     </div>
   );

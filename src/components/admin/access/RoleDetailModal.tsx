@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { RoleStatItem } from '@/lib/access/access-service';
-import { X, ShieldCheck, Check, Save, AlertCircle, AlertTriangle } from 'lucide-react';
+import { X, ShieldCheck, Check, Minus, Save, AlertCircle, AlertTriangle } from 'lucide-react';
 import { AdminBadgeSemanticType, AdminStatusBadge } from '@/components/admin/ui';
 
 interface RoleDetailModalProps {
@@ -49,6 +49,26 @@ export function RoleDetailModal({
       next.delete(code);
     } else {
       next.add(code);
+    }
+    setSelectedPermissions(next);
+  };
+
+  const toggleModulePermissions = (modulePermissions: { code: string }[]) => {
+    if (!canEdit) return;
+    const moduleCodes = modulePermissions.map((p) => p.code);
+    const allSelected = moduleCodes.every((code) => selectedPermissions.has(code));
+    const next = new Set(selectedPermissions);
+
+    if (allSelected) {
+      // Deselect all in this module
+      for (const code of moduleCodes) {
+        next.delete(code);
+      }
+    } else {
+      // Select all in this module
+      for (const code of moduleCodes) {
+        next.add(code);
+      }
     }
     setSelectedPermissions(next);
   };
@@ -115,7 +135,34 @@ export function RoleDetailModal({
               Granted Permissions: <strong>{selectedPermissions.size}</strong>
             </span>
           </div>
-          <div>
+          <div className="flex items-center gap-3">
+            {canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allCodes = new Set<string>();
+                    for (const m of allPermissionsByModule) {
+                      for (const p of m.permissions) {
+                        allCodes.add(p.code);
+                      }
+                    }
+                    setSelectedPermissions(allCodes);
+                  }}
+                  className="text-xs font-semibold text-resort-forest hover:underline cursor-pointer"
+                >
+                  Select All ({allPermissionsByModule.reduce((acc, m) => acc + m.permissions.length, 0)})
+                </button>
+                <span className="text-resort-sand">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPermissions(new Set())}
+                  className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                >
+                  Clear All
+                </button>
+              </>
+            )}
             {!canEdit && (
               <span className="text-[11px] text-resort-muted italic">
                 Read-only mode (requires role:manage permission to edit)
@@ -141,17 +188,48 @@ export function RoleDetailModal({
           )}
 
           <div className="space-y-6">
-            {allPermissionsByModule.map((mod) => (
-              <div key={mod.module} className="border border-resort-sand/70 rounded-lg overflow-hidden bg-white">
-                <div className="px-4 py-2.5 bg-resort-ivory/40 border-b border-resort-sand/70 flex items-center justify-between">
-                  <h4 className="font-serif text-xs font-bold uppercase tracking-wider text-resort-forest">
-                    {mod.label}
-                  </h4>
-                  <span className="text-[11px] text-resort-stone">
-                    {mod.permissions.filter((p) => selectedPermissions.has(p.code)).length} of {mod.permissions.length} active
-                  </span>
-                </div>
-                <div className="divide-y divide-resort-sand/40">
+            {allPermissionsByModule.map((mod) => {
+              const activeCount = mod.permissions.filter((p) => selectedPermissions.has(p.code)).length;
+              const totalCount = mod.permissions.length;
+              const isAllActive = totalCount > 0 && activeCount === totalCount;
+              const isIndeterminate = activeCount > 0 && activeCount < totalCount;
+
+              return (
+                <div key={mod.module} className="border border-resort-sand/70 rounded-lg overflow-hidden bg-white">
+                  <div className="px-4 py-2.5 bg-resort-ivory/40 border-b border-resort-sand/70 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <h4 className="font-serif text-xs font-bold uppercase tracking-wider text-resort-forest">
+                        {mod.label}
+                      </h4>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-[11px] text-resort-stone">
+                        {activeCount} of {totalCount} active
+                      </span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => toggleModulePermissions(mod.permissions)}
+                          className="flex items-center justify-center cursor-pointer group"
+                          title={isAllActive ? `Deselect all ${mod.label}` : `Select all ${mod.label}`}
+                        >
+                          <div
+                            className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${
+                              isAllActive
+                                ? 'bg-resort-forest text-white border-resort-forest'
+                                : isIndeterminate
+                                ? 'bg-resort-forest/20 text-resort-forest border-resort-forest/60'
+                                : 'border-resort-sand bg-white text-transparent group-hover:border-resort-forest/50'
+                            }`}
+                          >
+                            {isAllActive && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            {isIndeterminate && <Minus className="w-3.5 h-3.5 stroke-[3]" />}
+                          </div>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-resort-sand/40">
                   {mod.permissions.map((perm) => {
                     const isGranted = selectedPermissions.has(perm.code);
                     return (
@@ -188,8 +266,9 @@ export function RoleDetailModal({
                   })}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
         </div>
 
         {/* Footer */}
