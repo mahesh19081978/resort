@@ -307,6 +307,7 @@ async function executeHoldCreation(
       checkInDate: input.checkInDate,
       checkOutDate: input.checkOutDate,
       rooms: input.rooms,
+      ratePlanId: input.ratePlanId,
       depositRatio: 1.0, // 100% advance deposit requirement
     },
     tx

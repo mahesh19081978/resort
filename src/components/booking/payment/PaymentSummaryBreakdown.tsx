@@ -4,6 +4,8 @@ import React from 'react';
 import { formatCurrency } from '@/lib/utils';
 import { Info, Loader2, AlertCircle } from 'lucide-react';
 
+import type { PublicNightRate } from '@/actions/booking/pricing';
+
 export interface PaymentSummaryBreakdownProps {
   roomName: string;
   nights: number;
@@ -16,6 +18,10 @@ export interface PaymentSummaryBreakdownProps {
   totalAmount: number | null;
   requiredAdvanceAmount: number | null;
   balanceAtHotel: number | null;
+  discountAmount?: number | null;
+  isDiscounted?: boolean;
+  offerLabel?: string | null;
+  nightlyRates?: PublicNightRate[];
   isLoading?: boolean;
   pricingError?: string | null;
 }
@@ -32,6 +38,10 @@ export function PaymentSummaryBreakdown({
   totalAmount,
   requiredAdvanceAmount,
   balanceAtHotel,
+  discountAmount = 0,
+  isDiscounted = false,
+  offerLabel = null,
+  nightlyRates,
   isLoading = false,
   pricingError = null,
 }: PaymentSummaryBreakdownProps) {
@@ -80,7 +90,17 @@ export function PaymentSummaryBreakdown({
           <span>{pricingError}</span>
         </div>
       ) : (
-        <div className="space-y-1.5 text-xs text-resort-muted">
+        <div className="space-y-2 text-xs text-resort-muted">
+          {/* Promotion Banner if applicable */}
+          {isDiscounted && (
+            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-emerald-800">
+              <span className="font-semibold">{offerLabel || 'Promotional Offer Applied'}</span>
+              <span className="font-bold text-emerald-700">
+                - {formatCurrency(discountAmount || 0)}
+              </span>
+            </div>
+          )}
+
           {/* Room Charges */}
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1">
@@ -97,6 +117,32 @@ export function PaymentSummaryBreakdown({
               </span>
             )}
           </div>
+
+          {/* Itemized Nightly Breakdown */}
+          {nightlyRates && nightlyRates.length > 0 && (
+            <div className="pl-2 pr-1 py-2 bg-resort-sand/30 rounded-xl space-y-1.5 border border-resort-sand/50">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted block">
+                Nightly Rate Breakdown ({nightlyRates.length} {nightlyRates.length === 1 ? 'night' : 'nights'}):
+              </span>
+              {nightlyRates.map((n) => (
+                <div key={n.date} className="flex items-center justify-between text-[11px]">
+                  <span className="text-resort-charcoal-text">
+                    {n.date} <span className="text-resort-muted text-[10px]">({n.rateName || n.rateType})</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {n.isDiscounted && (
+                      <span className="line-through text-resort-muted text-[10px]">
+                        {formatCurrency(n.referencePrice)}
+                      </span>
+                    )}
+                    <span className="font-medium text-resort-charcoal-text">
+                      {formatCurrency(n.appliedPrice)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Taxes & Fees - Dynamic from Server Authority */}
           <div className="flex items-center justify-between">

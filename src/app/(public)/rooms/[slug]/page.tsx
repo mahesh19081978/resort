@@ -12,6 +12,7 @@ import { formatCurrency } from '@/lib/utils';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -28,9 +29,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function RoomDetailPage({ params }: PageProps) {
+export default async function RoomDetailPage({ params, searchParams }: PageProps) {
   const { slug } = await params;
-  const room = await getPublicRoomTypeBySlug(slug);
+  const sp = searchParams ? await searchParams : {};
+  const checkIn = typeof sp.checkIn === 'string' ? sp.checkIn : undefined;
+  const checkOut = typeof sp.checkOut === 'string' ? sp.checkOut : undefined;
+
+  const room = await getPublicRoomTypeBySlug(slug, { checkIn, checkOut });
 
   if (!room) {
     notFound();
@@ -165,16 +170,58 @@ export default async function RoomDetailPage({ params }: PageProps) {
                 <div className="sticky top-28 bg-white rounded-2xl shadow-luxury p-8 border border-resort-sand/30">
                   <div className="mb-6">
                     <span className="text-xs text-resort-muted uppercase tracking-wider">
-                      Starting from
+                      {room.pricing ? 'Selected Stay Rate' : 'Starting from'}
                     </span>
-                    <p className="text-3xl font-display font-semibold text-resort-forest mt-1">
-                      {formatCurrency(room.basePrice)}
-                      <span className="text-sm font-normal text-resort-muted ml-1">/ night</span>
-                    </p>
+                    
+                    {room.pricing?.isDiscounted ? (
+                      <div className="mt-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base line-through text-resort-muted/80">
+                            {formatCurrency(room.basePrice)}
+                          </span>
+                          <span className="text-[11px] font-bold uppercase tracking-wider bg-emerald-600 text-white px-2 py-0.5 rounded-md">
+                            {room.pricing.effectiveOfferLabel || `Save ${formatCurrency(room.pricing.totalPromotionDiscount)}`}
+                          </span>
+                        </div>
+                        <p className="text-3xl font-display font-semibold text-resort-forest mt-0.5">
+                          {formatCurrency(room.pricing.averageNightlyRate)}
+                          <span className="text-sm font-normal text-resort-muted ml-1">/ night</span>
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-3xl font-display font-semibold text-resort-forest mt-1">
+                        {formatCurrency(room.pricing ? room.pricing.averageNightlyRate : room.basePrice)}
+                        <span className="text-sm font-normal text-resort-muted ml-1">/ night</span>
+                      </p>
+                    )}
+
+                    {room.pricing && (
+                      <div className="mt-3 pt-3 border-t border-resort-sand/40">
+                        <p className="text-xs text-resort-muted flex justify-between">
+                          <span>Stay Total ({room.pricing.nightsBreakdown.length} nights):</span>
+                          <span className="font-semibold text-resort-charcoal-text">
+                            {formatCurrency(room.pricing.totalStayAmount)}
+                          </span>
+                        </p>
+                        {room.pricing.nightsBreakdown.length > 1 && (
+                          <div className="mt-2 space-y-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted block">
+                              Nightly Breakdown:
+                            </span>
+                            {room.pricing.nightsBreakdown.map((n) => (
+                              <div key={n.date} className="flex justify-between text-[11px] text-resort-muted">
+                                <span>{n.date} ({n.rateType})</span>
+                                <span className="font-medium text-resort-charcoal-text">{formatCurrency(n.appliedPrice)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <Link
-                    href="/booking"
+                    href={`/booking?roomTypeId=${room.id}${checkIn ? `&checkIn=${checkIn}` : ''}${checkOut ? `&checkOut=${checkOut}` : ''}`}
                     className="flex items-center justify-center gap-2 w-full py-3.5 bg-resort-forest text-white font-semibold rounded-full hover:bg-resort-forest-light transition-colors"
                   >
                     Book Your Stay

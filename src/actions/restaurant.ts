@@ -405,6 +405,21 @@ export async function recordBillPaymentAction(
       userId: user.id,
     });
 
+    const autoCloseSession = formData.get('autoCloseSession') === 'true';
+    if (autoCloseSession && result.isFullySettled && result.bill) {
+      const order = await prisma.restaurantOrder.findUnique({
+        where: { id: result.bill.orderId },
+        select: { tableSessionId: true },
+      });
+      if (order?.tableSessionId) {
+        try {
+          await closeTableSession({ sessionId: order.tableSessionId, userId: user.id });
+        } catch (closeErr) {
+          console.warn('[recordBillPaymentAction] Auto close session non-blocking note:', closeErr);
+        }
+      }
+    }
+
     revalidatePath('/admin/restaurant');
     revalidatePath('/admin/restaurant/bills');
     revalidatePath('/admin/restaurant/orders');
@@ -446,9 +461,25 @@ export async function postBillToRoomChargeAction(
       userId: user.id,
     });
 
+    const autoCloseSession = formData.get('autoCloseSession') === 'true';
+    if (autoCloseSession && result.bill) {
+      const order = await prisma.restaurantOrder.findUnique({
+        where: { id: result.bill.orderId },
+        select: { tableSessionId: true },
+      });
+      if (order?.tableSessionId) {
+        try {
+          await closeTableSession({ sessionId: order.tableSessionId, userId: user.id });
+        } catch (closeErr) {
+          console.warn('[postBillToRoomChargeAction] Auto close session non-blocking note:', closeErr);
+        }
+      }
+    }
+
     revalidatePath('/admin/restaurant');
     revalidatePath('/admin/restaurant/bills');
     revalidatePath('/admin/restaurant/orders');
+    revalidatePath('/admin/restaurant/tables');
     revalidatePath('/admin/frontdesk');
     revalidatePath('/admin/folios');
     return { success: true, data: result };

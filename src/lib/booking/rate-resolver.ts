@@ -1,6 +1,22 @@
 import { Prisma, RateType } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 
+export const PUBLIC_DEFAULT_RATE_PLAN_CODE = 'CP';
+
+export async function resolveRatePlanByCode(
+  code: string,
+  client: Prisma.TransactionClient | typeof defaultPrisma = defaultPrisma
+): Promise<{ id: string; code: string; name: string }> {
+  const plan = await client.ratePlan.findUnique({
+    where: { code, isActive: true },
+    select: { id: true, code: true, name: true },
+  });
+  if (!plan) {
+    throw new Error(`RATE_PLAN_NOT_FOUND: No active rate plan with code '${code}'`);
+  }
+  return plan;
+}
+
 export type ResolverRateType = RateType | 'BASE';
 
 export interface ResolvedNightRate {

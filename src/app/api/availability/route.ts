@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAvailableRoomTypes } from '@/lib/availability/service';
 import { availabilitySearchSchema } from '@/lib/availability/schema';
+import { PUBLIC_DEFAULT_RATE_PLAN_CODE, resolveRatePlanByCode } from '@/lib/booking/rate-resolver';
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,6 +11,7 @@ export async function GET(request: NextRequest) {
     const guests = searchParams.get('guests');
     const adults = searchParams.get('adults');
     const children = searchParams.get('children');
+    const ratePlanCode = searchParams.get('ratePlanCode') || PUBLIC_DEFAULT_RATE_PLAN_CODE;
 
     const parsed = availabilitySearchSchema.safeParse({
       checkIn: checkIn || undefined,
@@ -26,7 +28,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const result = await getAvailableRoomTypes(parsed.data);
+    const ratePlan = await resolveRatePlanByCode(ratePlanCode);
+    const result = await getAvailableRoomTypes(parsed.data, undefined, ratePlan.id);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('[API_AVAILABILITY_ERROR]', error);

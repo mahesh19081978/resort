@@ -7,6 +7,7 @@ import { SectionHeading } from '@/components/public/SectionHeading';
 import { ScrollReveal } from '@/components/public/ScrollReveal';
 import { availabilitySearchSchema } from '@/lib/availability/schema';
 import { getAvailableRoomTypes, type AvailableRoomType } from '@/lib/availability/service';
+import { PUBLIC_DEFAULT_RATE_PLAN_CODE, resolveRatePlanByCode } from '@/lib/booking/rate-resolver';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 export const metadata: Metadata = {
@@ -139,7 +140,8 @@ export default async function AvailabilityPage({ searchParams }: PageProps) {
   let dbError = false;
 
   try {
-    const result = await getAvailableRoomTypes(parsed.data);
+    const ratePlan = await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE);
+    const result = await getAvailableRoomTypes(parsed.data, undefined, ratePlan.id);
     availableRoomTypes = result.availableRoomTypes;
     totalAvailable = result.totalAvailable;
   } catch (error) {
@@ -392,8 +394,17 @@ function AvailabilityResultCard({
   nights: number;
 }) {
   const imageSrc = getRoomImage(room);
-  const totalPrice = room.basePrice * nights;
-  const detailHref = `/rooms/${room.slug}`;
+  
+  // Date-Aware Pricing from Canonical Resolver
+  const pricing = room.pricing;
+  const isDiscounted = Boolean(pricing?.isDiscounted);
+  const sellingPricePerNight = pricing ? pricing.averageNightlyRate : room.basePrice;
+  const referencePricePerNight = pricing ? pricing.totalReferenceAmount / Math.max(1, pricing.nightsBreakdown.length) : room.basePrice;
+  const totalStayPrice = pricing ? pricing.totalStayAmount : room.basePrice * nights;
+  const discountSavings = pricing ? pricing.totalPromotionDiscount : 0;
+  const offerLabel = pricing?.effectiveOfferLabel;
+
+  const detailHref = `/rooms/${room.slug}?checkIn=${checkIn}&checkOut=${checkOut}`;
   const bookHref = buildBookUrl(room.roomTypeId, checkIn, checkOut, String(guests));
   const amenitySummary = getAmenitySummary(room.amenities);
 
@@ -409,15 +420,20 @@ function AvailabilityResultCard({
           sizes="(max-width: 768px) 100vw, 320px"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
-        {room.availableRoomCount <= 3 && (
-          <div className="absolute top-4 left-4">
-            <span className="text-[10px] font-semibold uppercase tracking-widest bg-resort-gold/90 text-white px-3 py-1.5 rounded-full">
+        <div className="absolute top-4 left-4 flex flex-col gap-2">
+          {room.availableRoomCount <= 3 && (
+            <span className="text-[10px] font-semibold uppercase tracking-widest bg-resort-gold/90 text-white px-3 py-1.5 rounded-full shadow-sm">
               {room.availableRoomCount === 1
                 ? '1 room left'
                 : `${room.availableRoomCount} rooms left`}
             </span>
-          </div>
-        )}
+          )}
+          {isDiscounted && (
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-600 text-white px-3 py-1.5 rounded-full shadow-md">
+              {offerLabel || `Save ${formatCurrency(discountSavings)}`}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -447,15 +463,39 @@ function AvailabilityResultCard({
           <p className="text-xs text-resort-muted mb-4">{amenitySummary}</p>
         )}
 
+        {/* Nightly Breakdown details if multi-night stay */}
+        {pricing && pricing.nightsBreakdown.length > 1 && (
+          <div className="p-3 bg-resort-sand/20 rounded-xl mb-4 text-xs space-y-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-resort-muted block">
+              Nightly Rates ({pricing.nightsBreakdown.length} nights):
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+              {pricing.nightsBreakdown.map((nb) => (
+                <div key={nb.date} className="flex justify-between text-resort-muted">
+                  <span>{nb.date} ({nb.rateType}):</span>
+                  <span className="font-medium text-resort-charcoal-text">{formatCurrency(nb.appliedPrice)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Mobile price */}
         <div className="md:hidden flex items-center gap-4 pt-4 border-t border-resort-sand/50">
           <div>
-            <p className="text-xl font-display font-semibold text-resort-forest">
-              {formatCurrency(room.basePrice)}
-              <span className="text-xs font-normal text-resort-muted ml-1">/ night</span>
-            </p>
+            <div className="flex items-baseline gap-1.5">
+              {isDiscounted && (
+                <span className="text-xs line-through text-resort-muted/80">
+                  {formatCurrency(referencePricePerNight)}
+                </span>
+              )}
+              <p className="text-xl font-display font-semibold text-resort-forest">
+                {formatCurrency(sellingPricePerNight)}
+                <span className="text-xs font-normal text-resort-muted ml-1">/ night</span>
+              </p>
+            </div>
             <p className="text-xs text-resort-muted mt-0.5">
-              {formatCurrency(totalPrice)} total · {nights} {nights === 1 ? 'night' : 'nights'}
+              {formatCurrency(totalStayPrice)} total · {nights} {nights === 1 ? 'night' : 'nights'}
             </p>
           </div>
         </div>
@@ -478,19 +518,24 @@ function AvailabilityResultCard({
       </div>
 
       {/* Desktop sidebar price + CTAs */}
-      <div className="hidden md:flex flex-col items-center justify-center gap-4 px-8 py-8 border-l border-resort-sand/30 min-w-[200px]">
+      <div className="hidden md:flex flex-col items-center justify-center gap-4 px-8 py-8 border-l border-resort-sand/30 min-w-[220px]">
         <div className="text-center">
+          {isDiscounted && (
+            <span className="text-xs line-through text-resort-muted/80 block">
+              {formatCurrency(referencePricePerNight)}
+            </span>
+          )}
           <p className="text-2xl font-display font-semibold text-resort-forest">
-            {formatCurrency(room.basePrice)}
+            {formatCurrency(sellingPricePerNight)}
           </p>
-          <p className="text-xs text-resort-muted mt-1">per night</p>
+          <p className="text-xs text-resort-muted mt-0.5">per night</p>
         </div>
         <div className="w-12 h-px bg-resort-sand" />
         <div className="text-center">
           <p className="text-lg font-display font-medium text-resort-charcoal-text">
-            {formatCurrency(totalPrice)}
+            {formatCurrency(totalStayPrice)}
           </p>
-          <p className="text-xs text-resort-muted mt-1">
+          <p className="text-xs text-resort-muted mt-0.5">
             {nights} {nights === 1 ? 'night' : 'nights'} total
           </p>
         </div>

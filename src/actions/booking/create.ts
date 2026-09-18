@@ -7,6 +7,7 @@ import { checkRateLimit } from '@/lib/security/rate-limit';
 import { ok, fail, ActionResult } from '@/lib/errors';
 import { headers } from 'next/headers';
 import { Prisma } from '@prisma/client';
+import { PUBLIC_DEFAULT_RATE_PLAN_CODE, resolveRatePlanByCode } from '@/lib/booking/rate-resolver';
 
 export interface BookingSubmissionResult {
   booking: SanitizedPublicBooking;
@@ -89,6 +90,9 @@ export async function createPublicBookingAction(
     }
 
     // 5. Create Reservation Hold or Confirmed Pay at Hotel under Pessimistic DB Lock
+    // SECURITY: Enforce server-side public rate plan. Never trust client-submitted ratePlanId.
+    const publicPlan = await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE);
+    input.ratePlanId = publicPlan.id;
     const booking = await createReservationHold(input);
 
     // 6. Generate Short-Lived Scoped Access Tokens

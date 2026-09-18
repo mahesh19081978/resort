@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition, useRef } from 'react';
 import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
-import { calculatePublicPricingAction, PublicPricingSummary } from '@/actions/booking/pricing';
+import { calculatePublicPricingAction, PublicPricingSummary, getPublicRatePlanId } from '@/actions/booking/pricing';
 import {
   CalendarDays,
   Users,
@@ -106,6 +106,9 @@ function BookingForm() {
   const [availableTypes, setAvailableTypes] = useState<any[]>([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
 
+  // Public Rate Plan ID (resolved from server)
+  const [ratePlanId, setRatePlanId] = useState<string | null>(null);
+
   // Policy State
   const [allowPayAtHotel, setAllowPayAtHotel] = useState(true);
 
@@ -134,6 +137,12 @@ function BookingForm() {
       process.env.NEXT_PUBLIC_ALLOW_PAY_AT_HOTEL === 'false' ||
       process.env.NEXT_PUBLIC_MANDATORY_ADVANCE === 'true';
     setAllowPayAtHotel(!isPayAtHotelDisabled);
+
+    getPublicRatePlanId().then((res) => {
+      if (res.success && res.data) {
+        setRatePlanId(res.data);
+      }
+    });
   }, []);
 
   // Check URL params for confirmed return from payment gateway using signed token
@@ -228,6 +237,7 @@ function BookingForm() {
           roomsCount: Number(roomsCount) || 1,
         },
       ],
+      ratePlanId: ratePlanId || undefined,
     })
       .then((res) => {
         // Discard if a subsequent request has been fired
@@ -251,7 +261,7 @@ function BookingForm() {
           setIsPricingLoading(false);
         }
       });
-  }, [checkIn, checkOut, roomTypeId, roomsCount]);
+  }, [checkIn, checkOut, roomTypeId, roomsCount, ratePlanId]);
 
   const formattedTotalPayable = serverPricing
     ? formatCurrency(serverPricing.requiredAdvanceAmount)
@@ -301,6 +311,7 @@ function BookingForm() {
         paymentMethod,
         onlineSubMethod: paymentMethod === 'PAY_ONLINE' ? onlineSubMethod : undefined,
         specialRequests: specialRequests || undefined,
+        ratePlanId: ratePlanId || undefined,
       });
 
       if (!result.success) {
@@ -802,6 +813,10 @@ function BookingForm() {
                     totalAmount={serverPricing?.totalAmount ?? null}
                     requiredAdvanceAmount={serverPricing?.requiredAdvanceAmount ?? null}
                     balanceAtHotel={serverPricing?.balanceAtHotel ?? null}
+                    discountAmount={serverPricing?.discountAmount ?? 0}
+                    isDiscounted={serverPricing?.lines?.[0]?.isDiscounted ?? false}
+                    offerLabel={serverPricing?.lines?.[0]?.offerLabel ?? null}
+                    nightlyRates={serverPricing?.lines?.[0]?.nightlyRates}
                     isLoading={isPricingLoading}
                     pricingError={pricingError}
                   />
@@ -892,10 +907,24 @@ function BookingForm() {
                     <p className="text-xs text-resort-muted mt-1 leading-relaxed">
                       {selectedRoom.description?.slice(0, 110)}...
                     </p>
-                    <p className="text-lg font-display font-semibold text-resort-forest mt-3">
-                      {formatCurrency(selectedRoom.basePrice)}
-                      <span className="text-xs font-body font-normal text-resort-muted ml-1">/ night</span>
-                    </p>
+                    <div className="mt-3">
+                      {serverPricing?.lines?.[0]?.isDiscounted ? (
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs line-through text-resort-muted/80">
+                            {formatCurrency(serverPricing.lines[0].basePrice)}
+                          </span>
+                          <p className="text-lg font-display font-semibold text-resort-forest">
+                            {formatCurrency(serverPricing.lines[0].ratePerNight)}
+                            <span className="text-xs font-body font-normal text-resort-muted ml-1">/ night</span>
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-lg font-display font-semibold text-resort-forest">
+                          {formatCurrency(serverPricing?.lines?.[0]?.ratePerNight ?? selectedRoom.basePrice)}
+                          <span className="text-xs font-body font-normal text-resort-muted ml-1">/ night</span>
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

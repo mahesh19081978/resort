@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import { requirePermission } from '@/lib/auth/auth';
 import { RestaurantHeader } from '@/components/restaurant/RestaurantHeader';
-import { TablesView, TableItem } from '@/components/restaurant/TablesView';
+import { TablesView, TableItem, TableSessionItem, TableSessionBill } from '@/components/restaurant/TablesView';
 import {
   TableConfigurationView,
   SittingAreaData,
@@ -43,7 +43,26 @@ export default async function RestaurantTablesPage({
               session: {
                 include: {
                   tables: { include: { table: true } },
-                  orders: true,
+                  orders: {
+                    include: {
+                      items: {
+                        include: { menuItem: true },
+                      },
+                      kots: {
+                        include: {
+                          items: {
+                            include: { menuItem: true },
+                          },
+                        },
+                      },
+                      bills: {
+                        include: {
+                          payments: true,
+                        },
+                      },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                  },
                 },
               },
             },
@@ -52,6 +71,22 @@ export default async function RestaurantTablesPage({
         orderBy: { tableNumber: 'asc' },
       },
     },
+  });
+
+  // Fetch active in-house stays to enable room charge transfers
+  const activeStays = await prisma.stay.findMany({
+    where: {
+      status: 'ACTIVE',
+    },
+    include: {
+      primaryGuest: true,
+      roomAssignments: {
+        where: { status: 'ACTIVE' },
+        include: { room: true },
+      },
+      folio: true,
+    },
+    orderBy: { actualCheckIn: 'desc' },
   });
 
   if (!restaurant) {
@@ -67,6 +102,70 @@ export default async function RestaurantTablesPage({
   const formattedFloorTables: TableItem[] = restaurant.tables.map((t) => {
     const activeST = t.sessionTables[0];
     const session = activeST?.session;
+
+    let totalSubtotal = 0;
+    let totalTax = 0;
+    let totalGrand = 0;
+    const allItems: TableSessionItem[] = [];
+    const billsList: TableSessionBill[] = [];
+
+    if (session) {
+      for (const ord of session.orders) {
+        // Collect bills
+        for (const b of ord.bills) {
+          const totalPaid = b.payments
+            .filter((p) => p.status === 'SUCCESS')
+            .reduce((sum, p) => sum + p.amount.toNumber(), 0);
+          billsList.push({
+            id: b.id,
+            billNumber: b.billNumber,
+            status: b.status,
+            totalAmount: b.totalAmount.toNumber(),
+            totalPaid,
+            outstanding: Math.max(0, b.totalAmount.toNumber() - totalPaid),
+          });
+        }
+
+        // Collect items and find item status from KOTs
+        for (const item of ord.items) {
+          const unitPrice = item.unitPrice.toNumber();
+          const lineTotal = unitPrice * item.quantity;
+          const tax = (lineTotal * item.taxRate.toNumber()) / 100;
+          totalSubtotal += lineTotal;
+          totalTax += tax;
+
+          // Determine item status from KOT items
+          let itemStatus = 'PENDING';
+          const kotItemStatuses: string[] = [];
+          for (const k of ord.kots) {
+            const matched = k.items.find((ki) => ki.menuItemId === item.menuItemId);
+            if (matched) {
+              kotItemStatuses.push(k.status);
+            }
+          }
+          if (kotItemStatuses.includes('SERVED')) {
+            itemStatus = 'SERVED';
+          } else if (kotItemStatuses.includes('READY')) {
+            itemStatus = 'READY';
+          } else if (kotItemStatuses.includes('PREPARING')) {
+            itemStatus = 'PREPARING';
+          } else if (kotItemStatuses.includes('SENT')) {
+            itemStatus = 'SENT';
+          }
+
+          allItems.push({
+            id: item.id,
+            name: item.menuItem.name,
+            quantity: item.quantity,
+            unitPrice,
+            lineTotal,
+            status: itemStatus,
+            notes: item.notes,
+          });
+        }
+      }
+      totalGrand = totalSubtotal + totalTax;
+    }
 
     return {
       id: t.id,
@@ -86,8 +185,31 @@ export default async function RestaurantTablesPage({
               id: st.table.id,
               tableNumber: st.table.tableNumber,
             })),
+            orders: session.orders.map((o) => ({
+              id: o.id,
+              orderNumber: o.orderNumber,
+              status: o.status,
+            })),
+            items: allItems,
+            bills: billsList,
+            totals: {
+              subtotal: totalSubtotal,
+              taxTotal: totalTax,
+              grandTotal: totalGrand,
+            },
           }
         : null,
+    };
+  });
+
+  const formattedInhouseStays = activeStays.map((s) => {
+    const activeRoom = s.roomAssignments[0]?.room;
+    return {
+      id: s.id,
+      stayNumber: s.stayNumber,
+      guestName: `${s.primaryGuest.firstName} ${s.primaryGuest.lastName}`,
+      roomId: activeRoom?.id || '',
+      roomNumber: activeRoom?.roomNumber || 'N/A',
     };
   });
 
@@ -146,7 +268,11 @@ export default async function RestaurantTablesPage({
       </div>
 
       {currentTab === 'floor' ? (
-        <TablesView restaurantId={restaurant.id} tables={formattedFloorTables} />
+        <TablesView
+          restaurantId={restaurant.id}
+          tables={formattedFloorTables}
+          inhouseStays={formattedInhouseStays}
+        />
       ) : (
         <TableConfigurationView
           restaurantId={restaurant.id}

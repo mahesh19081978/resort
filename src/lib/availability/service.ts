@@ -3,11 +3,35 @@ import { Prisma } from '@prisma/client';
 import { type AvailabilitySearchParams } from './schema';
 import type { RoomType, Room, RoomTypeAmenity, Amenity, Media } from '@prisma/client';
 
+import { resolveBatchRoomRatesForStay } from '@/lib/booking/rate-resolver';
+
 type RoomTypeWithRelations = RoomType & {
   amenities: (RoomTypeAmenity & { amenity: Amenity })[];
   media: Media[];
   rooms: Pick<Room, 'id'>[];
 };
+
+export interface NightRateBreakdown {
+  date: string;
+  dayOfWeek: number;
+  isWeekend: boolean;
+  rateType: string;
+  appliedPrice: number;
+  referencePrice: number;
+  discountAmount: number;
+  isDiscounted: boolean;
+  offerLabel: string | null;
+}
+
+export interface StayPricingSummary {
+  totalStayAmount: number;
+  totalReferenceAmount: number;
+  totalPromotionDiscount: number;
+  averageNightlyRate: number;
+  isDiscounted: boolean;
+  effectiveOfferLabel: string | null;
+  nightsBreakdown: NightRateBreakdown[];
+}
 
 export interface AvailableRoomType {
   roomTypeId: string;
@@ -19,6 +43,7 @@ export interface AvailableRoomType {
   availableRoomCount: number;
   amenities: { name: string; code: string; icon: string | null }[];
   media: { id: string; fileUrl: string; title: string | null; isFeatured: boolean }[];
+  pricing?: StayPricingSummary;
 }
 
 export interface AvailabilityResult {
@@ -80,7 +105,8 @@ export interface AvailabilityResult {
  */
 export async function getAvailableRoomTypes(
   params: AvailabilitySearchParams,
-  client: Prisma.TransactionClient | typeof prisma = prisma
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+  ratePlanId?: string
 ): Promise<AvailabilityResult> {
   const requestedCheckIn = new Date(`${params.checkIn}T00:00:00Z`);
   const requestedCheckOut = new Date(`${params.checkOut}T00:00:00Z`);
@@ -200,6 +226,49 @@ export async function getAvailableRoomTypes(
         isFeatured: m.isFeatured,
       })),
     });
+  }
+
+  // ── STEP D: Authoritative Date-Aware Rate Resolution via Canonical Resolver ──
+  if (availableRoomTypes.length > 0 && params.checkIn && params.checkOut) {
+    try {
+      const roomTypeIds = availableRoomTypes.map((r) => r.roomTypeId);
+      const stayRatesMap = await resolveBatchRoomRatesForStay(
+        {
+          roomTypeIds,
+          ratePlanId,
+          checkInDate: params.checkIn,
+          checkOutDate: params.checkOut,
+        },
+        client
+      );
+
+      for (const room of availableRoomTypes) {
+        const stayRate = stayRatesMap.get(room.roomTypeId);
+        if (stayRate) {
+          room.pricing = {
+            totalStayAmount: stayRate.totalBaseAmount.toNumber(),
+            totalReferenceAmount: stayRate.totalReferenceAmount.toNumber(),
+            totalPromotionDiscount: stayRate.totalPromotionDiscount.toNumber(),
+            averageNightlyRate: stayRate.averageNightlyRate.toNumber(),
+            isDiscounted: stayRate.isDiscounted,
+            effectiveOfferLabel: stayRate.effectiveOfferLabel,
+            nightsBreakdown: stayRate.nights.map((n) => ({
+              date: n.date,
+              dayOfWeek: n.dayOfWeek,
+              isWeekend: n.isWeekend,
+              rateType: n.rateType,
+              appliedPrice: n.appliedPrice.toNumber(),
+              referencePrice: n.referencePrice.toNumber(),
+              discountAmount: n.discountAmount.toNumber(),
+              isDiscounted: n.isDiscounted,
+              offerLabel: n.offerLabel,
+            })),
+          };
+        }
+      }
+    } catch (pricingError) {
+      console.error('[AVAILABILITY_STAY_RATES_RESOLUTION_ERROR]', pricingError);
+    }
   }
 
   return {

@@ -23,10 +23,18 @@ const FALLBACK_AMENITIES = [
   { icon: Car, title: 'Complimentary Breakfast', desc: 'Fresh buffet spread served each morning.' },
 ];
 
-export default async function RoomsPage() {
+interface RoomsPageProps {
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+}
+
+export default async function RoomsPage({ searchParams }: RoomsPageProps) {
+  const sp = searchParams ? await searchParams : {};
+  const checkIn = typeof sp.checkIn === 'string' ? sp.checkIn : undefined;
+  const checkOut = typeof sp.checkOut === 'string' ? sp.checkOut : undefined;
+
   let rooms: PublicRoomType[] = [];
   try {
-    rooms = await getPublicRoomTypes();
+    rooms = await getPublicRoomTypes({ checkIn, checkOut });
   } catch {
     rooms = [];
   }
@@ -128,7 +136,7 @@ export default async function RoomsPage() {
           {featuredRoom && (
             <div className="mt-14">
               <ScrollReveal>
-                <RoomCard room={featuredRoom} variant="horizontal" />
+                <RoomCard room={featuredRoom} variant="horizontal" checkIn={checkIn} checkOut={checkOut} />
               </ScrollReveal>
             </div>
           )}
@@ -138,7 +146,7 @@ export default async function RoomsPage() {
             <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
               {remainingRooms.map((room, i) => (
                 <ScrollReveal key={room.id} delay={i * 0.1}>
-                  <RoomCard room={room} />
+                  <RoomCard room={room} checkIn={checkIn} checkOut={checkOut} />
                 </ScrollReveal>
               ))}
             </div>

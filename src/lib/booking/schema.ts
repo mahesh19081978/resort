@@ -35,6 +35,7 @@ export const createBookingRequestSchema = z
     onlineSubMethod: z.enum(['CARD', 'UPI', 'NET_BANKING']).optional(),
     specialRequests: z.string().trim().max(500).optional(),
     turnstileToken: z.string().optional(),
+    ratePlanId: z.string().optional(),
   })
   .refine((data) => data.checkOutDate > data.checkInDate, {
     message: 'Check-out date must be strictly after check-in date',

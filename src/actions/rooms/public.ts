@@ -1,6 +1,8 @@
 'use server';
 
 import prisma from '@/lib/db/prisma';
+import { resolveBatchRoomRatesForStay, resolveRoomRateForStay, PUBLIC_DEFAULT_RATE_PLAN_CODE, resolveRatePlanByCode } from '@/lib/booking/rate-resolver';
+import type { StayPricingSummary } from '@/lib/availability/service';
 
 export interface PublicRoomType {
   id: string;
@@ -26,6 +28,28 @@ export interface PublicRoomType {
     isFeatured: boolean;
   }[];
   activeRoomCount: number;
+  pricing?: StayPricingSummary;
+  marketingPricing?: StayPricingSummary;
+}
+
+function getKolkataTodayString(): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(now);
+}
+
+function getKolkataTomorrowString(today: string): string {
+  const d = new Date(`${today}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export interface PublicRoomTypeDetail extends PublicRoomType {
@@ -72,14 +96,18 @@ const roomTypeInclude = {
   },
 };
 
-export async function getPublicRoomTypes(): Promise<PublicRoomType[]> {
+export async function getPublicRoomTypes(options?: {
+  checkIn?: string;
+  checkOut?: string;
+  ratePlanId?: string;
+}): Promise<PublicRoomType[]> {
   const roomTypes = await prisma.roomType.findMany({
     where: { isActive: true },
     orderBy: { displayOrder: 'asc' },
     include: roomTypeInclude,
   });
 
-  return roomTypes.map((rt) => ({
+  const publicRooms: PublicRoomType[] = roomTypes.map((rt) => ({
     id: rt.id,
     name: rt.name,
     code: rt.code,
@@ -95,10 +123,99 @@ export async function getPublicRoomTypes(): Promise<PublicRoomType[]> {
     media: rt.media,
     activeRoomCount: rt.rooms.length,
   }));
+
+  if (options?.checkIn && options?.checkOut && publicRooms.length > 0) {
+    try {
+      const roomTypeIds = publicRooms.map((r) => r.id);
+      const ratePlanId = options.ratePlanId ?? (await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE)).id;
+      const stayRatesMap = await resolveBatchRoomRatesForStay({
+        roomTypeIds,
+        ratePlanId,
+        checkInDate: options.checkIn,
+        checkOutDate: options.checkOut,
+      });
+
+      for (const room of publicRooms) {
+        const stayRate = stayRatesMap.get(room.id);
+        if (stayRate) {
+          room.pricing = {
+            totalStayAmount: stayRate.totalBaseAmount.toNumber(),
+            totalReferenceAmount: stayRate.totalReferenceAmount.toNumber(),
+            totalPromotionDiscount: stayRate.totalPromotionDiscount.toNumber(),
+            averageNightlyRate: stayRate.averageNightlyRate.toNumber(),
+            isDiscounted: stayRate.isDiscounted,
+            effectiveOfferLabel: stayRate.effectiveOfferLabel,
+            nightsBreakdown: stayRate.nights.map((n) => ({
+              date: n.date,
+              dayOfWeek: n.dayOfWeek,
+              isWeekend: n.isWeekend,
+              rateType: n.rateType,
+              appliedPrice: n.appliedPrice.toNumber(),
+              referencePrice: n.referencePrice.toNumber(),
+              discountAmount: n.discountAmount.toNumber(),
+              isDiscounted: n.isDiscounted,
+              offerLabel: n.offerLabel,
+            })),
+          };
+        }
+      }
+    } catch (err) {
+      console.error('[GET_PUBLIC_ROOMS_PRICING_ERROR]', err);
+    }
+  } else if (publicRooms.length > 0) {
+    // Marketing pricing for undated /rooms: today's ACTIVE PROMOTION if applicable, server-authoritative
+    // Never implies promotion applies to all dates; dated searches use exact nightly resolution above
+    try {
+      const today = getKolkataTodayString();
+      const tomorrow = getKolkataTomorrowString(today);
+      const roomTypeIds = publicRooms.map((r) => r.id);
+      const ratePlanId = options?.ratePlanId ?? (await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE)).id;
+      const stayRatesMap = await resolveBatchRoomRatesForStay({
+        roomTypeIds,
+        ratePlanId,
+        checkInDate: today,
+        checkOutDate: tomorrow,
+      });
+
+      for (const room of publicRooms) {
+        const stayRate = stayRatesMap.get(room.id);
+        if (stayRate) {
+          room.marketingPricing = {
+            totalStayAmount: stayRate.totalBaseAmount.toNumber(),
+            totalReferenceAmount: stayRate.totalReferenceAmount.toNumber(),
+            totalPromotionDiscount: stayRate.totalPromotionDiscount.toNumber(),
+            averageNightlyRate: stayRate.averageNightlyRate.toNumber(),
+            isDiscounted: stayRate.isDiscounted,
+            effectiveOfferLabel: stayRate.effectiveOfferLabel,
+            nightsBreakdown: stayRate.nights.map((n) => ({
+              date: n.date,
+              dayOfWeek: n.dayOfWeek,
+              isWeekend: n.isWeekend,
+              rateType: n.rateType,
+              appliedPrice: n.appliedPrice.toNumber(),
+              referencePrice: n.referencePrice.toNumber(),
+              discountAmount: n.discountAmount.toNumber(),
+              isDiscounted: n.isDiscounted,
+              offerLabel: n.offerLabel,
+            })),
+          };
+        }
+      }
+    } catch (err) {
+      console.error('[GET_PUBLIC_ROOMS_MARKETING_PRICING_ERROR]', err);
+    }
+  }
+
+  return publicRooms;
 }
 
 export async function getPublicRoomTypeBySlug(
-  slug: string
+  slug: string,
+  options?: {
+    checkIn?: string;
+    checkOut?: string;
+    ratePlanId?: string;
+  }
 ): Promise<PublicRoomTypeDetail | null> {
   const roomType = await prisma.roomType.findUnique({
     where: { slug, isActive: true },
@@ -127,6 +244,42 @@ export async function getPublicRoomTypeBySlug(
     },
   });
 
+  let pricing: StayPricingSummary | undefined;
+
+  if (options?.checkIn && options?.checkOut) {
+    try {
+      const ratePlanId = options.ratePlanId ?? (await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE)).id;
+      const stayRate = await resolveRoomRateForStay({
+        roomTypeId: roomType.id,
+        ratePlanId,
+        checkInDate: options.checkIn,
+        checkOutDate: options.checkOut,
+      });
+
+      pricing = {
+        totalStayAmount: stayRate.totalBaseAmount.toNumber(),
+        totalReferenceAmount: stayRate.totalReferenceAmount.toNumber(),
+        totalPromotionDiscount: stayRate.totalPromotionDiscount.toNumber(),
+        averageNightlyRate: stayRate.averageNightlyRate.toNumber(),
+        isDiscounted: stayRate.isDiscounted,
+        effectiveOfferLabel: stayRate.effectiveOfferLabel,
+        nightsBreakdown: stayRate.nights.map((n) => ({
+          date: n.date,
+          dayOfWeek: n.dayOfWeek,
+          isWeekend: n.isWeekend,
+          rateType: n.rateType,
+          appliedPrice: n.appliedPrice.toNumber(),
+          referencePrice: n.referencePrice.toNumber(),
+          discountAmount: n.discountAmount.toNumber(),
+          isDiscounted: n.isDiscounted,
+          offerLabel: n.offerLabel,
+        })),
+      };
+    } catch (err) {
+      console.error('[GET_PUBLIC_ROOM_DETAIL_PRICING_ERROR]', err);
+    }
+  }
+
   return {
     id: roomType.id,
     name: roomType.name,
@@ -142,6 +295,7 @@ export async function getPublicRoomTypeBySlug(
     amenities: roomType.amenities.map((ra) => ra.amenity),
     media: roomType.media,
     activeRoomCount: roomType.rooms.length,
+    pricing,
     relatedRoomTypes: relatedRoomTypes.map((rt) => ({
       id: rt.id,
       name: rt.name,

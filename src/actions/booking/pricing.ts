@@ -3,6 +3,16 @@
 import { calculateBookingPrice } from '@/lib/booking/pricing-calculator';
 import { ok, fail, ActionResult } from '@/lib/errors';
 import { prisma } from '@/lib/db/prisma';
+import { PUBLIC_DEFAULT_RATE_PLAN_CODE, resolveRatePlanByCode } from '@/lib/booking/rate-resolver';
+
+export async function getPublicRatePlanId(): Promise<ActionResult<string>> {
+  try {
+    const plan = await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE);
+    return ok(plan.id);
+  } catch (error: any) {
+    return fail(error?.message || 'Failed to resolve public rate plan.', 'INTERNAL_ERROR');
+  }
+}
 
 export interface PublicPricingItem {
   roomTypeId: string;
@@ -13,18 +23,35 @@ export interface PublicPricingInput {
   checkInDate: string;
   checkOutDate: string;
   rooms: PublicPricingItem[];
+  ratePlanId?: string;
+}
+
+export interface PublicNightRate {
+  date: string;
+  dayOfWeek: number;
+  isWeekend: boolean;
+  rateType: string;
+  rateName: string | null;
+  appliedPrice: number;
+  referencePrice: number;
+  discountAmount: number;
+  isDiscounted: boolean;
+  offerLabel: string | null;
 }
 
 export interface PublicPricingLine {
   roomTypeId: string;
   name: string;
-  basePrice: number;
+  basePrice: number; // Rack/Reference price
   roomsCount: number;
   totalNights: number;
-  ratePerNight: number;
+  ratePerNight: number; // Effective average nightly rate
   discountAmount: number;
   taxAmount: number;
   lineTotal: number;
+  isDiscounted?: boolean;
+  offerLabel?: string | null;
+  nightlyRates?: PublicNightRate[];
 }
 
 export interface PublicPricingSummary {
@@ -77,6 +104,9 @@ export async function calculatePublicPricingAction(
       }
     }
 
+    // SECURITY: Enforce server-side public rate plan. Never trust client-submitted ratePlanId.
+    const publicPlan = await resolveRatePlanByCode(PUBLIC_DEFAULT_RATE_PLAN_CODE);
+
     const result = await calculateBookingPrice(
       {
         checkInDate,
@@ -85,6 +115,7 @@ export async function calculatePublicPricingAction(
           roomTypeId: r.roomTypeId,
           roomsCount: r.roomsCount,
         })),
+        ratePlanId: publicPlan.id,
       },
       prisma
     );
@@ -116,6 +147,20 @@ export async function calculatePublicPricingAction(
         discountAmount: l.discountAmount.toNumber(),
         taxAmount: l.taxAmount.toNumber(),
         lineTotal: l.lineTotal.toNumber(),
+        isDiscounted: l.isDiscounted,
+        offerLabel: l.offerLabel,
+        nightlyRates: l.nightlyRateSnapshot?.map((n) => ({
+          date: n.date,
+          dayOfWeek: n.dayOfWeek,
+          isWeekend: n.isWeekend,
+          rateType: n.rateType,
+          rateName: n.rateName,
+          appliedPrice: n.appliedPrice.toNumber(),
+          referencePrice: n.referencePrice.toNumber(),
+          discountAmount: n.discountAmount.toNumber(),
+          isDiscounted: n.isDiscounted,
+          offerLabel: n.offerLabel,
+        })),
       })),
     });
   } catch (error: any) {
