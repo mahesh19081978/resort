@@ -2,11 +2,14 @@ import { Prisma } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { resolveTaxForRoom } from '@/lib/db/tax';
 
+import { resolveBatchRoomRatesForStay, ResolvedStayRates, ResolvedNightRate } from './rate-resolver';
+
 export interface RoomLinePricingInput {
   roomTypeId: string;
   roomsCount: number;
   basePrice: Prisma.Decimal | number | string;
   nights: number;
+  nightlyRates?: ResolvedNightRate[];
 }
 
 export interface CalculatedRoomLine {
@@ -17,6 +20,7 @@ export interface CalculatedRoomLine {
   discountAmount: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
+  nightlyRates?: ResolvedNightRate[];
 }
 
 export interface ReservationPricingResult {
@@ -35,7 +39,9 @@ export interface CalculateBookingPriceInput {
   rooms: Array<{
     roomTypeId: string;
     roomsCount: number;
+    ratePlanId?: string;
   }>;
+  ratePlanId?: string;
   discountAmount?: Prisma.Decimal | number;
   depositRatio?: Prisma.Decimal | number;
 }
@@ -57,6 +63,9 @@ export interface CanonicalPricingResult extends ReservationPricingResult {
     discountAmount: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
     lineTotal: Prisma.Decimal;
+    isDiscounted?: boolean;
+    offerLabel?: string | null;
+    nightlyRateSnapshot?: ResolvedNightRate[];
   }>;
 }
 
@@ -112,21 +121,36 @@ export function calculateReservationPricing(params: {
     ratePerNight: Prisma.Decimal;
     totalNights: number;
     lineBase: Prisma.Decimal;
+    nightlyRates?: ResolvedNightRate[];
   }> = [];
 
   for (const item of params.items) {
-    const ratePerNight = roundCurrency(new Prisma.Decimal(item.basePrice));
-    const nights = item.nights;
-    const count = new Prisma.Decimal(item.roomsCount);
-    const lineBase = roundCurrency(ratePerNight.mul(nights).mul(count));
+    let lineBase: Prisma.Decimal;
+    let ratePerNight: Prisma.Decimal;
+
+    if (item.nightlyRates && item.nightlyRates.length > 0) {
+      // Sum of dynamic nightly rates for 1 room:
+      const singleRoomNightSum = item.nightlyRates.reduce(
+        (sum, n) => sum.add(n.appliedPrice),
+        new Prisma.Decimal(0)
+      );
+      const count = new Prisma.Decimal(item.roomsCount);
+      lineBase = roundCurrency(singleRoomNightSum.mul(count));
+      ratePerNight = roundCurrency(singleRoomNightSum.div(new Prisma.Decimal(item.nights)));
+    } else {
+      ratePerNight = roundCurrency(new Prisma.Decimal(item.basePrice));
+      const count = new Prisma.Decimal(item.roomsCount);
+      lineBase = roundCurrency(ratePerNight.mul(item.nights).mul(count));
+    }
 
     subtotal = subtotal.add(lineBase);
     preTaxLines.push({
       roomTypeId: item.roomTypeId,
       roomsCount: item.roomsCount,
       ratePerNight,
-      totalNights: nights,
+      totalNights: item.nights,
       lineBase,
+      nightlyRates: item.nightlyRates,
     });
   }
 
@@ -174,6 +198,7 @@ export function calculateReservationPricing(params: {
       discountAmount: lineDiscount,
       taxAmount: lineTax,
       lineTotal,
+      nightlyRates: l.nightlyRates,
     });
   }
 
@@ -238,13 +263,28 @@ export async function calculateBookingPrice(
   // Authoritative Scope-Based Tax Resolution (No hardcoded tax codes!)
   const resolvedTax = await resolveTaxForRoom(asOf, client);
 
+  // Authoritative Rate Resolution (Single Batch Query across all requested room types)
+  const resolvedStayRatesMap = await resolveBatchRoomRatesForStay(
+    {
+      roomTypeIds,
+      ratePlanId: input.ratePlanId,
+      checkInDate: input.checkInDate,
+      checkOutDate: input.checkOutDate,
+      asOf,
+    },
+    client
+  );
+
   const pricingItems: RoomLinePricingInput[] = input.rooms.map((item) => {
     const rt = roomTypeMap.get(item.roomTypeId)!;
+    const resolvedRates = resolvedStayRatesMap.get(item.roomTypeId);
+
     return {
       roomTypeId: item.roomTypeId,
       roomsCount: item.roomsCount,
       basePrice: rt.basePrice,
       nights,
+      nightlyRates: resolvedRates?.nights,
     };
   });
 
@@ -257,6 +297,8 @@ export async function calculateBookingPrice(
 
   const roomDetails = pricing.lines.map((l) => {
     const rt = roomTypeMap.get(l.roomTypeId)!;
+    const resolvedRates = resolvedStayRatesMap.get(l.roomTypeId);
+
     return {
       roomTypeId: l.roomTypeId,
       name: rt.name,
@@ -267,6 +309,9 @@ export async function calculateBookingPrice(
       discountAmount: l.discountAmount,
       taxAmount: l.taxAmount,
       lineTotal: l.lineTotal,
+      isDiscounted: resolvedRates?.isDiscounted ?? false,
+      offerLabel: resolvedRates?.effectiveOfferLabel ?? null,
+      nightlyRateSnapshot: l.nightlyRates,
     };
   });
 

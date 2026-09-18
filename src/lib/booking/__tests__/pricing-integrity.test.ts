@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PRICING INTEGRITY REGRESSION TESTS
  *
  * Verifies the single-source-of-truth pricing architecture implemented to fix
@@ -158,6 +158,13 @@ describe("C. CANONICAL PRICING ENGINE — calculateBookingPrice() with mocked DB
             ? [{ id: "rt-std", name: "Standard Heritage Room", basePrice: new Prisma.Decimal("5500.00"), isActive: true }]
             : []
         ),
+      },
+      ratePlan: {
+        findUnique: vi.fn().mockResolvedValue({ id: "rp-ep", code: "EP", name: "European Plan", isActive: true }),
+        findFirst: vi.fn().mockResolvedValue({ id: "rp-ep", code: "EP", name: "European Plan", isActive: true }),
+      },
+      roomRate: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
       tax: {
         findMany: vi.fn().mockResolvedValue(

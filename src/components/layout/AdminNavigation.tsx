@@ -25,6 +25,7 @@ import {
   Shield,
   Calendar,
   MapPin,
+  Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logoutAction } from '@/actions/auth';
@@ -53,6 +54,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/admin/dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
       { href: '/admin/bookings', label: 'Reservations', icon: CalendarCheck },
       { href: '/admin/rooms', label: 'Rooms & PMS', icon: BedDouble },
+      { href: '/admin/rooms/rates', label: 'Room Rates', icon: Tag },
       { href: '/admin/frontdesk', label: 'Front Desk Operations', icon: UserCheck },
       { href: '/admin/guests', label: 'Guest Database', icon: Users },
     ],

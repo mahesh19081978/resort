@@ -17,10 +17,15 @@ import {
   roomTypeAmenitiesSchema,
   roomAmenityOverrideSchema,
   deleteEntitySchema,
+  roomRateSchema,
+  roomRateUpdateSchema,
+  toggleRoomRateStatusSchema,
+  previewRatesSchema,
 } from '@/validations/pms';
 import { validateManualStatusTransition } from '@/lib/pms/status-machine';
 import { executeBatchRoomGeneration, previewRoomGenerationCollisions } from '@/lib/pms/room-generator';
-import { PhysicalRoomStatus } from '@prisma/client';
+import { resolveRoomRateForStay } from '@/lib/booking/rate-resolver';
+import { PhysicalRoomStatus, Prisma } from '@prisma/client';
 
 export interface ActionResponse<T = unknown> {
   success: boolean;
@@ -1018,6 +1023,319 @@ export async function deleteRoomAction(
     revalidatePath('/admin/rooms');
     revalidatePath('/admin/property');
     return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+// ----------------------------------------------------
+// 12. ROOM RATE MANAGEMENT
+// Permission: 'room:manage'
+// ----------------------------------------------------
+
+/**
+ * Creates an authoritative RoomRate override rule.
+ * Requires 'room:manage' permission and records an atomic audit event.
+ */
+export async function createRoomRateAction(input: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('room:manage');
+    const parsed = roomRateSchema.safeParse(input);
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const {
+      roomTypeId,
+      ratePlanId,
+      rateType,
+      name,
+      basePrice,
+      extraAdultPrice,
+      extraChildPrice,
+      startDate,
+      endDate,
+      daysOfWeek,
+      priority,
+      isActive,
+    } = parsed.data;
+
+    // Verify foreign key existence
+    const [roomType, ratePlan] = await Promise.all([
+      prisma.roomType.findUnique({ where: { id: roomTypeId, isActive: true } }),
+      prisma.ratePlan.findUnique({ where: { id: ratePlanId, isActive: true } }),
+    ]);
+
+    if (!roomType) {
+      return { success: false, error: 'ROOM_TYPE_NOT_FOUND: Selected room type is invalid or inactive.' };
+    }
+    if (!ratePlan) {
+      return { success: false, error: 'RATE_PLAN_NOT_FOUND: Selected rate plan is invalid or inactive.' };
+    }
+
+    // Convert calendar date strings to UTC Date bounds if present
+    const startUtc = startDate ? new Date(`${startDate}T00:00:00.000Z`) : null;
+    const endUtc = endDate ? new Date(`${endDate}T23:59:59.999Z`) : null;
+
+    const created = await prisma.$transaction(async (tx) => {
+      const rate = await tx.roomRate.create({
+        data: {
+          roomTypeId,
+          ratePlanId,
+          rateType,
+          name,
+          basePrice: new Prisma.Decimal(basePrice.toFixed(2)),
+          extraAdultPrice: new Prisma.Decimal(extraAdultPrice.toFixed(2)),
+          extraChildPrice: new Prisma.Decimal(extraChildPrice.toFixed(2)),
+          startDate: startUtc,
+          endDate: endUtc,
+          daysOfWeek,
+          priority,
+          isActive,
+        },
+      });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_RATE_CREATED',
+          entity: 'RoomRate',
+          entityId: rate.id,
+          newValues: {
+            roomTypeId,
+            ratePlanId,
+            rateType,
+            name,
+            basePrice: rate.basePrice.toString(),
+            extraAdultPrice: rate.extraAdultPrice.toString(),
+            extraChildPrice: rate.extraChildPrice.toString(),
+            startDate: startDate || null,
+            endDate: endDate || null,
+            daysOfWeek,
+            priority,
+            isActive,
+          },
+        },
+        tx
+      );
+
+      return rate;
+    });
+
+    revalidatePath('/admin/rooms/rates');
+    return { success: true, data: created };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Updates an existing RoomRate override rule.
+ * Affects future pricing only. Historical reservation snapshots remain immutable.
+ */
+export async function updateRoomRateAction(input: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('room:manage');
+    const parsed = roomRateUpdateSchema.safeParse(input);
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const {
+      id,
+      roomTypeId,
+      ratePlanId,
+      rateType,
+      name,
+      basePrice,
+      extraAdultPrice,
+      extraChildPrice,
+      startDate,
+      endDate,
+      daysOfWeek,
+      priority,
+      isActive,
+    } = parsed.data;
+
+    // Verify foreign key existence
+    const [existingRate, roomType, ratePlan] = await Promise.all([
+      prisma.roomRate.findUnique({ where: { id } }),
+      prisma.roomType.findUnique({ where: { id: roomTypeId, isActive: true } }),
+      prisma.ratePlan.findUnique({ where: { id: ratePlanId, isActive: true } }),
+    ]);
+
+    if (!existingRate) {
+      return { success: false, error: 'ROOM_RATE_NOT_FOUND: Rate rule does not exist.' };
+    }
+    if (!roomType) {
+      return { success: false, error: 'ROOM_TYPE_NOT_FOUND: Selected room type is invalid or inactive.' };
+    }
+    if (!ratePlan) {
+      return { success: false, error: 'RATE_PLAN_NOT_FOUND: Selected rate plan is invalid or inactive.' };
+    }
+
+    const startUtc = startDate ? new Date(`${startDate}T00:00:00.000Z`) : null;
+    const endUtc = endDate ? new Date(`${endDate}T23:59:59.999Z`) : null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const rate = await tx.roomRate.update({
+        where: { id },
+        data: {
+          roomTypeId,
+          ratePlanId,
+          rateType,
+          name,
+          basePrice: new Prisma.Decimal(basePrice.toFixed(2)),
+          extraAdultPrice: new Prisma.Decimal(extraAdultPrice.toFixed(2)),
+          extraChildPrice: new Prisma.Decimal(extraChildPrice.toFixed(2)),
+          startDate: startUtc,
+          endDate: endUtc,
+          daysOfWeek,
+          priority,
+          isActive,
+        },
+      });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action: 'ROOM_RATE_UPDATED',
+          entity: 'RoomRate',
+          entityId: rate.id,
+          oldValues: {
+            roomTypeId: existingRate.roomTypeId,
+            ratePlanId: existingRate.ratePlanId,
+            rateType: existingRate.rateType,
+            name: existingRate.name,
+            basePrice: existingRate.basePrice.toString(),
+            extraAdultPrice: existingRate.extraAdultPrice.toString(),
+            extraChildPrice: existingRate.extraChildPrice.toString(),
+            startDate: existingRate.startDate?.toISOString() || null,
+            endDate: existingRate.endDate?.toISOString() || null,
+            daysOfWeek: existingRate.daysOfWeek,
+            priority: existingRate.priority,
+            isActive: existingRate.isActive,
+          },
+          newValues: {
+            roomTypeId,
+            ratePlanId,
+            rateType,
+            name,
+            basePrice: rate.basePrice.toString(),
+            extraAdultPrice: rate.extraAdultPrice.toString(),
+            extraChildPrice: rate.extraChildPrice.toString(),
+            startDate: startDate || null,
+            endDate: endDate || null,
+            daysOfWeek,
+            priority,
+            isActive,
+          },
+        },
+        tx
+      );
+
+      return rate;
+    });
+
+    revalidatePath('/admin/rooms/rates');
+    return { success: true, data: updated };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Toggles a RoomRate rule between Active and Inactive.
+ * Does not physically delete the record, preserving historical explainability.
+ */
+export async function toggleRoomRateStatusAction(input: unknown): Promise<ActionResponse> {
+  try {
+    const user = await requirePermission('room:manage');
+    const parsed = toggleRoomRateStatusSchema.safeParse(input);
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const { id, isActive } = parsed.data;
+
+    const existingRate = await prisma.roomRate.findUnique({ where: { id } });
+    if (!existingRate) {
+      return { success: false, error: 'ROOM_RATE_NOT_FOUND: Rate rule does not exist.' };
+    }
+
+    const action = isActive ? 'ROOM_RATE_ACTIVATED' : 'ROOM_RATE_DEACTIVATED';
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const rate = await tx.roomRate.update({
+        where: { id },
+        data: { isActive },
+      });
+
+      await recordAuditEvent(
+        {
+          userId: user.id,
+          action,
+          entity: 'RoomRate',
+          entityId: rate.id,
+          oldValues: { isActive: existingRate.isActive },
+          newValues: { isActive: rate.isActive },
+        },
+        tx
+      );
+
+      return rate;
+    });
+
+    revalidatePath('/admin/rooms/rates');
+    return { success: true, data: updated };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Calls the canonical server-side rate resolver to simulate stay pricing for an admin preview.
+ * Strictly uses resolveRoomRateForStay() to guarantee zero drift between preview and booking.
+ */
+export async function previewRoomRatesAction(input: unknown): Promise<ActionResponse> {
+  try {
+    await requirePermission('room:read');
+    const parsed = previewRatesSchema.safeParse(input);
+
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const { roomTypeId, ratePlanId, checkInDate, checkOutDate } = parsed.data;
+
+    const result = await resolveRoomRateForStay({
+      roomTypeId,
+      ratePlanId,
+      checkInDate,
+      checkOutDate,
+    });
+
+    // Serialize Decimal instances for client consumption
+    const serialized = {
+      ...result,
+      totalBaseAmount: result.totalBaseAmount.toString(),
+      totalReferenceAmount: result.totalReferenceAmount.toString(),
+      totalPromotionDiscount: result.totalPromotionDiscount.toString(),
+      averageNightlyRate: result.averageNightlyRate.toString(),
+      nights: result.nights.map((n) => ({
+        ...n,
+        referencePrice: n.referencePrice.toString(),
+        appliedPrice: n.appliedPrice.toString(),
+        discountAmount: n.discountAmount.toString(),
+        extraAdultPrice: n.extraAdultPrice.toString(),
+        extraChildPrice: n.extraChildPrice.toString(),
+      })),
+    };
+
+    return { success: true, data: serialized };
   } catch (error) {
     return { success: false, error: (error as Error).message };
   }

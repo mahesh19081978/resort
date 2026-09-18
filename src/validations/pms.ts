@@ -1,5 +1,5 @@
-﻿import { z } from 'zod';
-import { PhysicalRoomStatus } from '@prisma/client';
+import { z } from 'zod';
+import { PhysicalRoomStatus, RateType } from '@prisma/client';
 
 export const propertyUpdateSchema = z.object({
   propertyId: z.string().cuid({ message: 'Invalid property ID' }),
@@ -116,3 +116,108 @@ export type RoomStatusTransitionInput = z.infer<typeof roomStatusTransitionSchem
 export type AmenityInput = z.infer<typeof amenitySchema>;
 export type RoomTypeAmenitiesInput = z.infer<typeof roomTypeAmenitiesSchema>;
 export type RoomAmenityOverrideInput = z.infer<typeof roomAmenityOverrideSchema>;
+
+// ----------------------------------------------------
+// ROOM RATE SCHEMAS
+// ----------------------------------------------------
+
+export const roomRateBaseSchema = z.object({
+  roomTypeId: z.string().cuid({ message: 'Valid room type ID is required' }),
+  ratePlanId: z.string().cuid({ message: 'Valid rate plan ID is required' }),
+  rateType: z.nativeEnum(RateType, { message: 'Valid rate type is required' }),
+  name: z
+    .string()
+    .trim()
+    .max(100, 'Rate name cannot exceed 100 characters')
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.length > 0 ? val : null)),
+  basePrice: z.coerce
+    .number({ invalid_type_error: 'Rate per night must be a valid number' })
+    .min(0, 'Rate per night must be at least 0')
+    .max(1000000, 'Rate per night cannot exceed 1,000,000'),
+  extraAdultPrice: z.coerce
+    .number({ invalid_type_error: 'Extra adult price must be a valid number' })
+    .min(0, 'Extra adult price cannot be negative')
+    .max(1000000, 'Extra adult price cannot exceed 1,000,000')
+    .default(0),
+  extraChildPrice: z.coerce
+    .number({ invalid_type_error: 'Extra child price must be a valid number' })
+    .min(0, 'Extra child price cannot be negative')
+    .max(1000000, 'Extra child price cannot exceed 1,000,000')
+    .default(0),
+  startDate: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
+  endDate: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
+  daysOfWeek: z
+    .array(z.coerce.number().int().min(0).max(6))
+    .default([])
+    .refine(
+      (days) => new Set(days).size === days.length,
+      'Days of week cannot contain duplicate entries'
+    ),
+  priority: z.coerce
+    .number()
+    .int('Priority must be an integer')
+    .default(0),
+  isActive: z.boolean().default(true),
+});
+
+export const roomRateSchema = roomRateBaseSchema.refine(
+  (data) => {
+    if (data.startDate && data.endDate) {
+      return data.startDate <= data.endDate;
+    }
+    return true;
+  },
+  {
+    message: 'Start date must be on or before end date',
+    path: ['endDate'],
+  }
+);
+
+export const roomRateUpdateSchema = roomRateBaseSchema
+  .extend({
+    id: z.string().cuid({ message: 'Valid RoomRate ID is required' }),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return data.startDate <= data.endDate;
+      }
+      return true;
+    },
+    {
+      message: 'Start date must be on or before end date',
+      path: ['endDate'],
+    }
+  );
+
+export const toggleRoomRateStatusSchema = z.object({
+  id: z.string().cuid({ message: 'Valid RoomRate ID is required' }),
+  isActive: z.boolean(),
+});
+
+export const previewRatesSchema = z
+  .object({
+    roomTypeId: z.string().cuid({ message: 'Valid room type ID is required' }),
+    ratePlanId: z.string().cuid({ message: 'Valid rate plan ID is required' }),
+    checkInDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid check-in date (YYYY-MM-DD) is required'),
+    checkOutDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid check-out date (YYYY-MM-DD) is required'),
+  })
+  .refine((data) => data.checkOutDate > data.checkInDate, {
+    message: 'Check-out date must be strictly after check-in date',
+    path: ['checkOutDate'],
+  });
+
+export type RoomRateInput = z.infer<typeof roomRateSchema>;
+export type RoomRateUpdateInput = z.infer<typeof roomRateUpdateSchema>;
+export type ToggleRoomRateStatusInput = z.infer<typeof toggleRoomRateStatusSchema>;
+export type PreviewRatesInput = z.infer<typeof previewRatesSchema>;

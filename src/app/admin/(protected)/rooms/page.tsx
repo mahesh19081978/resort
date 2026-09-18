@@ -20,6 +20,7 @@ import {
   Ban,
   Clock,
   RefreshCw,
+  Tag,
 } from 'lucide-react';
 
 interface RoomsPageProps {
@@ -201,6 +202,11 @@ export default async function RoomsPage({ searchParams }: RoomsPageProps) {
           <Link href="/admin/rooms/types">
             <Button variant="outline" size="sm" className="gap-1.5 text-xs">
               <Layers className="h-3.5 w-3.5" /> Room Types
+            </Button>
+          </Link>
+          <Link href="/admin/rooms/rates">
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+              <Tag className="h-3.5 w-3.5" /> Room Rates
             </Button>
           </Link>
           <Link href="/admin/rooms/generate">

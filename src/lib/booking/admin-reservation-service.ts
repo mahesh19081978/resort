@@ -1423,6 +1423,7 @@ async function executeAdminReservationCreation(
           taxCode: pricing.taxCode,
           taxRate: pricing.taxRatePercent,
           taxSnapshotAt: new Date(),
+          nightlyRateSnapshot: l.nightlyRates ? JSON.parse(JSON.stringify(l.nightlyRates)) : Prisma.DbNull,
         })),
       },
     },
